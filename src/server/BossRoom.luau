@@ -404,9 +404,9 @@ function BossRoom.victory(player: Player): boolean
 		return false
 	end
 	BossRoom.setPending(player, false)
-	local id, isNew = (BossRoom.rewarder :: any)(player)
+	local id, isNew, pity = (BossRoom.rewarder :: any)(player)
 	if id then
-		State.remotes.BossReward:FireClient(player, id, isNew)
+		State.remotes.BossReward:FireClient(player, id, isNew, pity == true)
 	end
 	return id ~= nil
 end

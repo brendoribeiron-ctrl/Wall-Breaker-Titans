@@ -36,13 +36,7 @@ powershell -File tools\studio-input.ps1 -Steps "key:F5;wait:12000"   # F5 = Play
 
 No Play o `loadstring` fica desligado, por isso o contexto `server` só roda arquivos de `src/server/tests` (chegam como módulos). Código solto funciona no contexto `edit`, depois de reiniciar o Studio com o plugin instalado.
 
-## Fatias
+## Documentação
 
-1. Terreno, saco de pancada, Poder e HUD: **feito**
-2. Plataforma de carga, lançamento e barra de distância: **feito**
-3. Paredes com Poder mínimo e quebra em blocos: **feito**
-4. Roleta de cartas, card do resultado e inventário (hotbar): **feito**
-5. Pedestais e dinheiro por segundo: **feito** (falta o pad de upgrade por personagem)
-6. Upgrade do saco: **feito**; skills, rebirth e índice: botões no HUD, sem janela ainda
-7. Recompensas por tempo, diário, VIP e boosts
-8. Polimento
+Sistemas, decisões, roadmap e bugs conhecidos: [docs/INDEX.md](docs/INDEX.md) (a pasta do projeto
+abre como vault do Obsidian). Instruções para o agente: [CLAUDE.md](CLAUDE.md).

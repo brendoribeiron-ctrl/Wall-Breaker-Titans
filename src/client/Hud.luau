@@ -189,8 +189,102 @@ local function statRow(parent: Instance, name: string, glyph: string, color: Col
 	return row
 end
 
+-- Barra de vida com número (a do Roblox fica desligada): vida máxima vem da skill HEALTH,
+-- posta pelo servidor no Humanoid.
+local healthLabel: TextLabel? = nil
+
+local function buildHealth(block: Frame)
+	local row = Ui.frame(block, "Health", UDim2.fromOffset(300, 30), nil, Color3.fromRGB(30, 14, 22))
+	row.LayoutOrder = 5
+	Ui.corner(row, 9)
+	Ui.border(row, 3)
+	local fill = Ui.frame(row, "Fill", UDim2.fromScale(1, 1), nil, Color3.fromRGB(235, 50, 70))
+	Ui.corner(fill, 9)
+	local label = Ui.text(row, { name = "Label", text = "❤ 100 / 100", size = UDim2.fromScale(1, 1), textSize = 21, stroke = 3, z = 3 })
+	healthLabel = label
+	local tween: Tween? = nil
+	local connections: { RBXScriptConnection } = {}
+
+	local function watch(character: Model)
+		for _, connection in connections do
+			connection:Disconnect()
+		end
+		table.clear(connections)
+		local humanoid = character:WaitForChild("Humanoid", 10)
+		if not humanoid or not humanoid:IsA("Humanoid") then
+			return
+		end
+		local function refresh()
+			local max = math.max(humanoid.MaxHealth, 1)
+			local hp = math.clamp(humanoid.Health, 0, max)
+			local ratio = hp / max
+			label.Text = `❤ {math.ceil(hp)} / {math.floor(max)}`
+			fill.BackgroundColor3 = Color3.fromRGB(255, 70, 40):Lerp(Color3.fromRGB(235, 50, 70), math.clamp(ratio * 2, 0, 1))
+			if tween then
+				tween:Cancel()
+			end
+			tween = TweenService:Create(fill, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Size = UDim2.fromScale(ratio, 1) })
+			;(tween :: Tween):Play()
+		end
+		table.insert(connections, humanoid.HealthChanged:Connect(refresh))
+		table.insert(connections, humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(refresh))
+		refresh()
+	end
+	player.CharacterAdded:Connect(watch)
+	if player.Character then
+		task.spawn(watch, player.Character)
+	end
+end
+
+-- Barra de estamina embaixo da vida (atributos "Stamina"/"StaminaMax", que o servidor manda).
+-- Só aparece com o Shidori desbloqueado (hoje é o único que gasta estamina).
+local staminaLabel: TextLabel? = nil
+
+local function buildStamina(block: Frame)
+	local row = Ui.frame(block, "Stamina", UDim2.fromOffset(300, 18), nil, Color3.fromRGB(14, 22, 40))
+	row.LayoutOrder = 6
+	Ui.corner(row, 7)
+	Ui.border(row, 2)
+	local fill = Ui.frame(row, "Fill", UDim2.fromScale(1, 1), nil, Color3.fromRGB(80, 200, 255))
+	Ui.corner(fill, 7)
+	local label = Ui.text(row, { name = "Label", text = "⚡ 100 / 100", size = UDim2.fromScale(1, 1), textSize = 14, stroke = 2, z = 3 })
+	staminaLabel = label
+	local tween: Tween? = nil
+	local function refresh()
+		local unlocked = player:GetAttribute("Stat_shidori")
+		row.Visible = type(unlocked) == "number" and unlocked >= 1
+		local value = player:GetAttribute("Stamina")
+		local max = player:GetAttribute("StaminaMax")
+		local v = if type(value) == "number" then value else 0
+		local m = if type(max) == "number" and max > 0 then max else 100
+		local ratio = math.clamp(v / m, 0, 1)
+		label.Text = `⚡ {math.floor(v)} / {math.floor(m)}`
+		-- abaixo do custo do Shidori a barra fica apagada
+		fill.BackgroundColor3 = if v + 1e-6 >= Config.Shidori.cost then Color3.fromRGB(80, 200, 255) else Color3.fromRGB(70, 90, 130)
+		if tween then
+			tween:Cancel()
+		end
+		tween = TweenService:Create(fill, TweenInfo.new(0.12, Enum.EasingStyle.Linear), { Size = UDim2.fromScale(ratio, 1) })
+		;(tween :: Tween):Play()
+	end
+	for _, name in { "Stamina", "StaminaMax", "Stat_shidori" } do
+		player:GetAttributeChangedSignal(name):Connect(refresh)
+	end
+	refresh()
+end
+
+-- Texto da barra de estamina (para os testes).
+function Hud.staminaText(): string
+	return if staminaLabel then staminaLabel.Text else ""
+end
+
+-- Texto da barra de vida (para os testes).
+function Hud.healthText(): string
+	return if healthLabel then healthLabel.Text else ""
+end
+
 local function buildStats(root: ScreenGui): (Instance, Instance)
-	local block = Ui.frame(root, "Stats", UDim2.fromOffset(330, 190), UDim2.new(0, 14, 1, -12), nil, Vector2.new(0, 1))
+	local block = Ui.frame(root, "Stats", UDim2.fromOffset(330, 248), UDim2.new(0, 14, 1, -12), nil, Vector2.new(0, 1))
 	Ui.autoScale(block)
 	local list = Instance.new("UIListLayout")
 	list.SortOrder = Enum.SortOrder.LayoutOrder
@@ -225,6 +319,8 @@ local function buildStats(root: ScreenGui): (Instance, Instance)
 	local bar = Ui.frame(friend, "Bar", UDim2.fromOffset(70, 10), UDim2.fromOffset(196, 8), Color3.fromRGB(30, 34, 54))
 	Ui.corner(bar, 5)
 	Ui.border(bar, 2)
+	buildHealth(block)
+	buildStamina(block)
 	return power, money
 end
 
@@ -271,7 +367,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Hotbar: os 8 primeiros personagens do inventário
 
-type Slot = { frame: Frame, viewport: ViewportFrame, name: TextLabel, border: UIStroke, scale: UIScale, id: string? }
+type Slot = { frame: Frame, viewport: ViewportFrame, name: TextLabel, number: TextLabel, border: UIStroke, scale: UIScale, id: string? }
 
 local slots: { Slot } = {}
 local hintLabel: TextLabel
@@ -372,7 +468,7 @@ local function buildHotbar(root: ScreenGui)
 		viewport.BackgroundTransparency = 1
 		viewport.Size = UDim2.fromScale(1, 0.82)
 		viewport.Parent = frame
-		Ui.text(frame, { name = "Number", text = tostring(index), size = UDim2.fromOffset(16, 16), position = UDim2.fromOffset(4, 2), textSize = 14, stroke = 2, z = 3 })
+		local number = Ui.text(frame, { name = "Number", text = tostring(index), size = UDim2.fromOffset(16, 16), position = UDim2.fromOffset(4, 2), textSize = 14, stroke = 2, z = 3 })
 		local name = Ui.text(frame, { name = "Name", text = "", size = UDim2.new(1, -4, 0, 20), position = UDim2.new(0, 2, 1, -21), stroke = 2, z = 3 })
 		local limit = Instance.new("UITextSizeConstraint")
 		limit.MaxTextSize = 12
@@ -381,16 +477,28 @@ local function buildHotbar(root: ScreenGui)
 		button.Activated:Connect(function()
 			select(index)
 		end)
-		slots[index] = { frame = frame, viewport = viewport, name = name, border = border, scale = scale, id = nil }
+		slots[index] = { frame = frame, viewport = viewport, name = name, number = number, border = border, scale = scale, id = nil }
 	end
 
-	local keys = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven, Enum.KeyCode.Eight }
+	local keys = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven, Enum.KeyCode.Eight, Enum.KeyCode.Nine }
+	-- quem tem a espada do Asta (só dev, src/client/Sword.luau) tem ela no slot 1: os personagens
+	-- passam para as teclas 2 a 9
+	local function keyOffset(): number
+		return if player:GetAttribute("SwordOwned") == true then 1 else 0
+	end
+	local function renumber()
+		for index, slot in slots do
+			slot.number.Text = tostring(index + keyOffset())
+		end
+	end
+	player:GetAttributeChangedSignal("SwordOwned"):Connect(renumber)
+	renumber()
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed then
 			return
 		end
-		local index = table.find(keys, input.KeyCode)
-		if index and index <= count then
+		local index = (table.find(keys, input.KeyCode) or 0) - keyOffset()
+		if index >= 1 and index <= count then
 			select(index)
 		end
 	end)
@@ -450,6 +558,7 @@ function Hud.start()
 	pcall(function()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false) -- a barra com número é a do HUD
 	end)
 
 	buildLeft(gui)

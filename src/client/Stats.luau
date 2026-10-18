@@ -1,5 +1,6 @@
 --!strict
--- Árvore de skills (botão SKILLS do HUD): três ramos (velocidade, chance e dano de crítico),
+-- Árvore de skills (botão SKILLS do HUD): seis ramos (velocidade, chance e dano de crítico,
+-- sorte, defesa e vida),
 -- cada um com um nó por nível. Os nós se ligam por linhas que acendem conforme o jogador
 -- compra; uma barreira marca até onde dá para ir antes do mundo 2. Clicar num nó escolhe o
 -- ramo (o cartão da esquerda mostra o efeito e o preço); clicar no próximo nó do ramo compra.
@@ -7,7 +8,7 @@
 -- A árvore fica à direita e o cartão no alto à esquerda: com a câmera do painel, a cabeça do
 -- boneco cobre o canto de baixo à esquerda da janela.
 -- A árvore é maior que a janela dela: dá para segurar e arrastar (ou rolar a roda do mouse), e
--- os três botões em cima do cartão levam direto a cada ramo.
+-- os botões em cima do cartão levam direto a cada ramo.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,20 +26,24 @@ local player = Players.LocalPlayer
 
 local Stats = {}
 
-local ICONS = { speed = "👟", critChance = "🎯", critDamage = "💥" }
-local COLORS = { speed = Color3.fromRGB(60, 200, 255), critChance = Color3.fromRGB(255, 196, 46), critDamage = Color3.fromRGB(255, 90, 70) }
+local ICONS = { speed = "👟", critChance = "🎯", critDamage = "💥", luck = "🍀", defense = "🛡️", health = "❤️", shidori = "⚡" }
+local COLORS = { speed = Color3.fromRGB(60, 200, 255), critChance = Color3.fromRGB(255, 196, 46), critDamage = Color3.fromRGB(255, 90, 70), luck = Color3.fromRGB(110, 235, 120), defense = Color3.fromRGB(170, 140, 255), health = Color3.fromRGB(255, 80, 120), shidori = Color3.fromRGB(110, 205, 255) }
 
 -- Desenho de um ramo, de baixo para cima: coluna (-1, 0, 1) e linha de cada nó, e quais nós
 -- cada linha liga. Os losangos são só desenho: a compra segue a ordem dos números.
 local LAYOUT = { { 0, 0 }, { 0, 1 }, { 0, 2 }, { -1, 3 }, { 1, 3 }, { 0, 4 }, { 0, 5 }, { -1, 6 }, { 1, 6 }, { 0, 7 } }
 local EDGES = { { 1, 2 }, { 2, 3 }, { 3, 4 }, { 3, 5 }, { 4, 6 }, { 5, 6 }, { 6, 7 }, { 7, 8 }, { 7, 9 }, { 8, 10 }, { 9, 10 } }
 local KEYSTONE = { [6] = true, [10] = true } -- nós maiores, no fecho de cada losango
-local TREE = Vector2.new(438, 440) -- tamanho do desenho da árvore, antes do zoom
+local COLUMN_GAP = 144 -- distância entre os ramos
+local COLUMNS: { number } = {} -- centro de cada ramo, um por skill de Config.StatOrder
+for index in Config.StatOrder do
+	COLUMNS[index] = 75 + (index - 1) * COLUMN_GAP
+end
+local TREE = Vector2.new(COLUMNS[#COLUMNS] + 75, 440) -- tamanho do desenho da árvore, antes do zoom
 local VIEW = Vector2.new(674, 440) -- janela por onde se vê a árvore
 local ZOOM = 1.8 -- quanto o desenho é ampliado dentro da janela
 local DRAG = 1.5 -- pixels do desenho por pixel de tela ao arrastar
 local WHEEL = 70 -- pixels por passo da roda do mouse
-local COLUMNS = { 75, 219, 363 } -- centro de cada ramo
 local STEP = Vector2.new(44, 45) -- distância entre colunas e entre linhas de um ramo
 local BASE_Y = 398 -- altura da primeira linha de nós
 local TRUNK_Y = 424
@@ -79,6 +84,16 @@ local function effectText(name: string, level: number): string
 		return `{Config.Move.walk + level * stat.perLevel} walk speed`
 	elseif name == "critChance" then
 		return `{math.floor((Config.Crit.baseChance + level * stat.perLevel) * 1000 + 0.5) / 10}% crit chance`
+	elseif name == "luck" then
+		return `x{math.floor(Config.luckFromStat(level) * 100 + 0.5) / 100} luck`
+	elseif name == "defense" then
+		return `-{math.floor(Config.defenseReduction(level) * 100 + 0.5)}% damage taken`
+	elseif name == "health" then
+		return `{Config.maxHealth(level)} max HP`
+	elseif name == "shidori" then
+		local S = Config.Shidori
+		local about = `[Z] {S.damage}x M1 damage · {S.cost} stamina · {S.cooldown}s cooldown`
+		return if level >= 1 then "SHIDORI unlocked " .. about else "Locked " .. about
 	end
 	return `x{Config.Crit.baseMultiplier + level * stat.perLevel} crit power`
 end
@@ -167,12 +182,17 @@ local function buildBranch(tree: Frame, remote: RemoteEvent, name: string, colum
 
 	-- do tronco até o primeiro nó
 	line(tree, Vector2.new(column, TRUNK_Y), nodeAt(column, 1), 3, GOLD:Lerp(DIM_LINE, 0.4))
+	-- ramos curtos (habilidade de um nó só) desenham só os nós que existem
+	local count = math.min(stat.max, #LAYOUT)
 	for _, pair in EDGES do
+		if pair[2] > count then
+			continue
+		end
 		local l = line(tree, nodeAt(column, pair[1]), nodeAt(column, pair[2]), 4, DIM_LINE)
 		table.insert(branch.edges, { line = l, to = pair[2] })
 	end
 
-	for index in LAYOUT do
+	for index = 1, count do
 		local at = nodeAt(column, index)
 		local size = if KEYSTONE[index] then 42 else 34
 		-- anel que pulsa em volta do próximo nó
@@ -267,9 +287,9 @@ local function build(remote: RemoteEvent)
 		Ui.frame(tree, "Grid", UDim2.new(1, 0, 0, 1), UDim2.fromOffset(0, y), Color3.fromRGB(120, 160, 255)).BackgroundTransparency = 0.9
 	end
 
-	-- tronco: liga os três ramos por baixo, com o núcleo no meio
+	-- tronco: liga os ramos por baixo, com o núcleo no meio
 	line(tree, Vector2.new(COLUMNS[1], TRUNK_Y), Vector2.new(COLUMNS[#COLUMNS], TRUNK_Y), 3, GOLD:Lerp(DIM_LINE, 0.4))
-	local core = Ui.frame(tree, "Core", UDim2.fromOffset(16, 16), UDim2.fromOffset(COLUMNS[2], TRUNK_Y), GOLD, Vector2.new(0.5, 0.5))
+	local core = Ui.frame(tree, "Core", UDim2.fromOffset(16, 16), UDim2.fromOffset(COLUMNS[math.ceil(#COLUMNS / 2)], TRUNK_Y), GOLD, Vector2.new(0.5, 0.5))
 	core.Rotation = 45
 	core.ZIndex = 4
 	Ui.border(core, 2, Color3.fromRGB(120, 80, 10))
@@ -286,7 +306,8 @@ local function build(remote: RemoteEvent)
 		local dash = Ui.frame(gate, "Dash", UDim2.fromOffset(10, 3), UDim2.new(0, x, 0.5, 0), LAVA, Vector2.new(0, 0.5))
 		dash.ZIndex = 3
 	end
-	for _, x in { (COLUMNS[1] + COLUMNS[2]) / 2, (COLUMNS[2] + COLUMNS[3]) / 2 } do
+	for index = 1, #COLUMNS - 1 do
+		local x = (COLUMNS[index] + COLUMNS[index + 1]) / 2
 		local tag = Ui.text(gate, { name = "Tag", text = "🔒 " .. Config.Worlds[2].name, color = Color3.fromRGB(255, 220, 190), size = UDim2.fromOffset(96, 20), position = UDim2.new(0, x, 0.5, 0), anchor = Vector2.new(0.5, 0.5), textSize = 12, stroke = 0, z = 4 })
 		tag.Font = Enum.Font.GothamBlack
 		tag.BackgroundTransparency = 0
@@ -295,16 +316,18 @@ local function build(remote: RemoteEvent)
 		Ui.border(tag, 2, LAVA)
 	end
 
-	-- um botão por ramo: escolhe e leva a janela até ele
+	-- um botão por ramo: escolhe e leva a janela até ele (todos cabem na largura do cartão)
+	local tabGap = 6
+	local tabWidth = math.floor((206 - (#Config.StatOrder - 1) * tabGap) / #Config.StatOrder)
 	for index, statName in Config.StatOrder do
 		local tab = Instance.new("TextButton")
 		tab.Name = "Tab" .. statName
-		tab.Position = UDim2.fromOffset(14 + (index - 1) * 71, 46)
-		tab.Size = UDim2.fromOffset(64, 44)
+		tab.Position = UDim2.fromOffset(14 + (index - 1) * (tabWidth + tabGap), 46)
+		tab.Size = UDim2.fromOffset(tabWidth, 44)
 		tab.BackgroundColor3 = COLORS[statName]
 		tab.Font = Enum.Font.FredokaOne
 		tab.Text = ICONS[statName]
-		tab.TextSize = 28
+		tab.TextSize = if tabWidth < 36 then 18 elseif tabWidth < 50 then 22 else 28
 		tab.AutoButtonColor = false
 		Ui.corner(tab, 12)
 		tabs[statName] = Ui.border(tab, 3)

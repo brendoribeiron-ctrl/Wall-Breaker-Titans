@@ -31,6 +31,7 @@ export type Profile = {
 	daily: { streak: number, last: number }, -- recompensa diária: dia da sequência e o dia do último resgate
 	quests: { day: number, progress: { [string]: number }, claimed: { [string]: boolean } },
 	hud: string, -- layout do HUD escolhido no editor (JSON de Shared.HudLayout); "" = padrão
+	bossWins: { [string]: number }, -- vitórias no chefe desde a última pena, por mundo ("1", "2")
 }
 
 type Session = {
@@ -66,6 +67,7 @@ local function defaults(): Profile
 		daily = { streak = 0, last = 0 },
 		quests = { day = 0, progress = {}, claimed = {} },
 		hud = "",
+		bossWins = {},
 	}
 end
 
@@ -180,6 +182,14 @@ local function sanitize(raw: any): Profile
 			end
 		end
 	end
+	if type(raw.bossWins) == "table" then
+		for _, world in Config.Worlds do
+			local wins = raw.bossWins[tostring(world.id)]
+			if type(wins) == "number" and wins > 0 then
+				profile.bossWins[tostring(world.id)] = math.clamp(math.floor(wins), 0, Config.Boss.pity - 1)
+			end
+		end
+	end
 	return profile
 end
 
@@ -192,11 +202,13 @@ local function mirror(player: Player, profile: Profile)
 	player:SetAttribute("Money", profile.money)
 	player:SetAttribute("BagLevel", profile.bagLevel)
 	player:SetAttribute("Inventory", table.concat(profile.inventory, ","))
-	-- índice: ids já obtidos, na ordem do Config (a janela INDEX lê daqui)
+	-- índice: ids já obtidos, mundo por mundo na ordem do Config (a janela INDEX lê daqui)
 	local found = {}
-	for _, info in Config.Characters do
-		if profile.index[info.id] then
-			table.insert(found, info.id)
+	for _, world in Config.Worlds do
+		for _, info in Config.IndexByWorld[world.id] do
+			if profile.index[info.id] then
+				table.insert(found, info.id)
+			end
 		end
 	end
 	player:SetAttribute("Index", table.concat(found, ","))
@@ -234,14 +246,22 @@ local function mirror(player: Player, profile: Profile)
 	player:SetAttribute("Mount", profile.mount)
 	-- níveis acima de 1, como "id:nível,id:nível" (a janela INDEX lê daqui)
 	local levels = {}
-	for _, info in Config.Characters do
-		local level = profile.levels[info.id]
-		if level and level > 1 then
-			table.insert(levels, info.id .. ":" .. level)
+	for _, world in Config.Worlds do
+		for _, info in Config.IndexByWorld[world.id] do
+			local level = profile.levels[info.id]
+			if level and level > 1 then
+				table.insert(levels, info.id .. ":" .. level)
+			end
 		end
 	end
 	player:SetAttribute("Levels", table.concat(levels, ","))
 	player:SetAttribute("HudLayout", profile.hud)
+	-- pena do chefe: vitórias de cada mundo, "1:12,2:3" (a barra do chefe lê daqui)
+	local wins = {}
+	for _, world in Config.Worlds do
+		table.insert(wins, world.id .. ":" .. (profile.bossWins[tostring(world.id)] or 0))
+	end
+	player:SetAttribute("BossWins", table.concat(wins, ","))
 end
 
 function PlayerData.load(player: Player): boolean

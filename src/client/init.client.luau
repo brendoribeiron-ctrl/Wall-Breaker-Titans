@@ -14,16 +14,22 @@ local Move = require(script.Move)
 local Others = require(script.Others)
 local Pose = require(script.Pose)
 local Run = require(script.Run)
+local Shidori = require(script.Shidori)
 local Stats = require(script.Stats)
 local Super = require(script.Super)
+local Sword = require(script.Sword)
+local SwordCombat = require(script.SwordCombat)
 local Worlds = require(script.Worlds)
 
--- a ordem define a prioridade das poses: movimento < montaria < soco < carga e lançamento
+-- a ordem define a prioridade das poses: movimento < espada < montaria < soco < carga e lançamento
 Hud.start()
 HudEditor.start()
 Pose.start()
 Aura.start()
 Move.start()
+Sword.start()
+SwordCombat.start() -- golpes por cima de todas as camadas (gancho Pose.after)
+Shidori.start() -- tecla Z: pose, investida e efeitos elétricos na mão esquerda
 Mount.start()
 Bag.start()
 Boss.start()

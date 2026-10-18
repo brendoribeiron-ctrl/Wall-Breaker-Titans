@@ -154,17 +154,27 @@ function Run.finish(player: Player)
 	end
 end
 
--- Sorteio da vitória contra o chefe: o personagem vem da última parede do mundo do jogador.
-function Run.reward(player: Player): (string?, boolean)
+-- Sorteio da vitória contra o chefe: o personagem vem da última parede do mundo do jogador, com
+-- a sorte extra da vitória (Config.Boss.victoryLuck). Pena: a vitória número Config.Boss.pity
+-- desde o último melhor personagem do mundo garante ele. Devolve o id, se é novo e se veio da pena.
+function Run.reward(player: Player): (string?, boolean, boolean)
 	local profile = PlayerData.get(player)
 	if not profile then
-		return nil, false
+		return nil, false, false
 	end
 	local world = State.world(player)
-	local characterId = Run.rollCharacter(#world.walls, Progress.luckBoost(player, profile), world)
+	local key = tostring(world.id)
+	local best = Config.bestCharacter(world)
+	local wins = (profile.bossWins[key] or 0) + 1
+	local pity = wins >= Config.Boss.pity
+	local luck = Progress.luckBoost(player, profile) * Config.Boss.victoryLuck
+	local characterId = if pity then best else Run.rollCharacter(#world.walls, luck, world)
+	PlayerData.update(player, function(p)
+		p.bossWins[key] = if characterId == best then 0 else wins
+	end)
 	local isNew = profile.index[characterId] ~= true
 	grant(player, characterId)
-	return characterId, isNew
+	return characterId, isNew, pity
 end
 
 -- chargeOverride só é usado pelos testes.

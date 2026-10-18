@@ -17,6 +17,7 @@ HudLayout.BLOCKS = {
 	{ id = "Stats", label = "MONEY & POWER" },
 	{ id = "Hotbar", label = "HOTBAR" },
 	{ id = "Jump", label = "JUMP" },
+	{ id = "Shidori", label = "SHIDORI" },
 }
 HudLayout.SIZE = { min = 0.5, max = 1.6 }
 HudLayout.OPACITY = { min = 0.2, max = 1 }

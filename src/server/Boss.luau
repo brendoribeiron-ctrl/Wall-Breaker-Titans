@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local Anims = require(ReplicatedStorage.Shared.GolemAnims)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Experiment = require(ReplicatedStorage.Shared.GolemExperiment) -- EXPERIMENTO (Config.Boss.slamV2)
+local CombatBalance = require(ReplicatedStorage.Shared.CombatBalance)
 local GolemModels = require(script.Parent.GolemModels)
 local PlayerData = require(script.Parent.PlayerData)
 local State = require(script.Parent.State)
@@ -31,6 +32,8 @@ local Boss = {}
 -- Ligados pelo BossRoom: vitória (sorteio) e derrota (perde o sorteio).
 Boss.onVictory = nil :: ((Player) -> ())?
 Boss.onDefeat = nil :: ((Player) -> ())?
+-- Ligado pelo init: Poder pelo dano válido de um soco (devolve o Poder ganho).
+Boss.onDamage = nil :: ((Player, number) -> number)?
 
 type Golem = {
 	key: string, -- nome da sala (BossRoom.luau): cada jogador tem a sua
@@ -50,6 +53,7 @@ type Golem = {
 	rage: boolean,
 	attack: string?,
 	attackId: number,
+	fight: number, -- conta as lutas da sala: o Poder de cada jogador vale por luta
 	restUntil: number,
 	lastAttack: string?,
 	emptySince: number?,
@@ -58,6 +62,9 @@ type Golem = {
 
 local golems: { [string]: Golem } = {}
 local lastPunch: { [Player]: number } = {}
+-- Poder de cada jogador quando a luta começou: o dano por soco fica fixo na luta, senão o Poder
+-- ganho batendo no golem o deixaria cada vez mais fraco no meio dela.
+local fightPower: { [Player]: { key: string, fight: number, power: number } } = {}
 local rng = Random.new()
 
 Boss.STYLES = GolemModels.STYLES
@@ -138,7 +145,10 @@ local function hurt(g: Golem, player: Player, amount: number, from: Vector3)
 	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
 		return
 	end
-	local damage = math.floor(amount * (if g.rage then BOSS.rageDamage else 1) + 0.5)
+	-- raiva primeiro, defesa (skill DEFENSE) uma vez só no fim; único ponto de dano do golem
+	local profile = PlayerData.get(player)
+	local raw = amount * (if g.rage then BOSS.rageDamage else 1)
+	local damage = Config.defendedDamage(raw, if profile then profile.stats.defense or 0 else 0)
 	humanoid:TakeDamage(damage)
 	local away = flat(root.Position - from)
 	local dir = if away.Magnitude > 0.1 then away.Unit else -cframe(g).LookVector
@@ -224,7 +234,7 @@ local function reset(g: Golem)
 	g.attack = nil
 	g.attackId += 1
 	g.rage = false
-	g.maxHp = BOSS.hp[g.world.id] or BOSS.hp[1]
+	g.maxHp = CombatBalance.bossHp(g.world.id)
 	g.hp = g.maxHp
 	g.emptySince = nil
 	-- ajoelhado no círculo, de frente para a porta (+Z)
@@ -478,6 +488,7 @@ function Boss.build(world: any, folder: Folder, center: Vector3, prompt: Proximi
 		rage = false,
 		attack = nil,
 		attackId = 0,
+		fight = 0,
 		restUntil = 0,
 		lastAttack = nil,
 		emptySince = nil,
@@ -499,8 +510,22 @@ function Boss.challenge(player: Player, allowed: boolean): boolean
 	if not g or g.state ~= "sleep" or not allowed then
 		return false
 	end
-	local count = math.max(#fighters(g), 1)
-	g.maxHp = (BOSS.hp[g.world.id] or BOSS.hp[1]) * count
+	if Config.Combat.enforceEntry then
+		local profile = PlayerData.get(player)
+		if not profile or not CombatBalance.canEnter(profile.power, g.world.id) then
+			local need = CombatBalance.boss(g.world.id).minPower
+			State.remotes.Fx:FireClient(player, "toast", `Need {need} Power to challenge this boss!`)
+			return false
+		end
+	end
+	local list = fighters(g)
+	local count = math.max(#list, 1)
+	g.fight += 1
+	for _, fighter in list do
+		local profile = PlayerData.get(fighter)
+		fightPower[fighter] = { key = g.key, fight = g.fight, power = if profile then profile.power else 0 }
+	end
+	g.maxHp = CombatBalance.bossHp(g.world.id) * count
 	g.hp = g.maxHp
 	g.model:SetAttribute("Hp", g.hp)
 	g.model:SetAttribute("MaxHp", g.maxHp)
@@ -521,10 +546,50 @@ function Boss.challenge(player: Player, allowed: boolean): boolean
 	return true
 end
 
--- Soco do jogador no golem. Devolve o dano (0 se não contou).
-function Boss.punch(player: Player, forceCrit: boolean?): number
+-- Golem da sala do jogador, se a luta estiver valendo (acordado e vivo).
+local function fightOf(player: Player): Golem?
 	local g = golems[player:GetAttribute("RoomKey") :: string]
 	if not g or g.state == "sleep" or g.state == "wake" or g.state == "dead" then
+		return nil
+	end
+	return g
+end
+
+-- Aplica um golpe válido do jogador: multiplier = múltiplos do dano de um soco (soco = 1).
+-- Crítico, Poder da luta, Poder ganho e fúria iguais para o soco e para a espada.
+local function deal(player: Player, g: Golem, multiplier: number, forceCrit: boolean?): number
+	local profile = PlayerData.get(player)
+	local chance = Config.Crit.baseChance + (if profile then (profile.stats.critChance or 0) * Config.Stats.critChance.perLevel else 0)
+	local crit = if forceCrit ~= nil then forceCrit else rng:NextNumber() < chance
+	-- o Poder que vale é o do começo da luta (quem entra no meio usa o do primeiro soco)
+	local snapshot = fightPower[player]
+	if not snapshot or snapshot.key ~= g.key or snapshot.fight ~= g.fight then
+		snapshot = { key = g.key, fight = g.fight, power = if profile then profile.power else 0 }
+		fightPower[player] = snapshot
+	end
+	local unit = CombatBalance.punchDamage(snapshot.power, g.world.id)
+	-- só conta o dano que a vida tinha para tirar (o último golpe não vale mais que o resto)
+	local full = math.max(1, math.floor(unit * multiplier + 1e-6))
+	local damage = math.min(if crit then full * Config.Combat.critMultiplier else full, g.hp)
+	g.hp -= damage
+	g.model:SetAttribute("Hp", g.hp)
+	-- o Poder pelo golpe conta em socos cheios (1, crítico 2), não em vida
+	local gain = if Boss.onDamage and damage > 0 then (Boss.onDamage :: any)(player, damage / unit) else 0
+	remote():FireClient(player, "hurt", damage, crit, gain)
+	if not g.rage and g.hp <= g.maxHp / 2 then
+		g.rage = true
+		g.model:SetAttribute("Rage", true)
+	end
+	if g.hp <= 0 then
+		die(g)
+	end
+	return damage
+end
+
+-- Soco do jogador no golem. Devolve o dano (0 se não contou).
+function Boss.punch(player: Player, forceCrit: boolean?): number
+	local g = fightOf(player)
+	if not g then
 		return 0
 	end
 	local t = os.clock()
@@ -537,21 +602,33 @@ function Boss.punch(player: Player, forceCrit: boolean?): number
 		return 0
 	end
 	lastPunch[player] = t
-	local profile = PlayerData.get(player)
-	local chance = Config.Crit.baseChance + (if profile then (profile.stats.critChance or 0) * Config.Stats.critChance.perLevel else 0)
-	local crit = if forceCrit ~= nil then forceCrit else rng:NextNumber() < chance
-	local damage = if crit then 2 else 1
-	g.hp = math.max(g.hp - damage, 0)
-	g.model:SetAttribute("Hp", g.hp)
-	remote():FireClient(player, "hurt", damage, crit)
-	if not g.rage and g.hp <= g.maxHp / 2 then
-		g.rage = true
-		g.model:SetAttribute("Rage", true)
+	return deal(player, g, 1, forceCrit)
+end
+
+-- Lâmina (pontos já calculados pelo servidor, src/server/SwordCombat.luau) passando pelo corpo do
+-- golem: cilindro com o raio do corpo + margin, do chão até a altura dele. Devolve o dano e o
+-- ponto que acertou (0, nil se não acertou). Quem chama garante uma vez por golpe.
+local BODY_HEIGHT = 34 -- studs do modelo (antes da escala)
+function Boss.bladeHit(player: Player, points: { Vector3 }, multiplier: number, margin: number, forceCrit: boolean?): (number, Vector3?)
+	local g = fightOf(player)
+	if not g then
+		return 0, nil
 	end
-	if g.hp <= 0 then
-		die(g)
+	local radius = BOSS.radius * S + margin
+	for _, point in points do
+		local height = point.Y - g.position.Y
+		if flat(point - g.position).Magnitude <= radius and height >= -3 and height <= BODY_HEIGHT * S then
+			return deal(player, g, multiplier, forceCrit), point
+		end
 	end
-	return damage
+	return 0, nil
+end
+
+-- Golpe de mão (Shidori, src/server/Shidori.luau): um ponto já calculado pelo servidor perto do
+-- corpo do golem (raio + margin). multiplier = múltiplos do soco, como na espada; o crítico vem
+-- depois, em deal(). Quem chama garante uma vez por ativação.
+function Boss.handHit(player: Player, point: Vector3, multiplier: number, margin: number, forceCrit: boolean?): (number, Vector3?)
+	return Boss.bladeHit(player, { point }, multiplier, margin, forceCrit)
 end
 
 function Boss.start()
@@ -562,6 +639,7 @@ function Boss.start()
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		lastPunch[player] = nil
+		fightPower[player] = nil
 	end)
 end
 
@@ -609,6 +687,9 @@ function Boss.test(room: string | number, action: string, arg: any): any
 		return true
 	elseif action == "reset" then
 		reset(g)
+		return true
+	elseif action == "enforce" then
+		Config.Combat.enforceEntry = arg == true -- liga/desliga a regra de entrada pelo Poder
 		return true
 	elseif action == "rest" then
 		g.restUntil = now() + arg

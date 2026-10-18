@@ -27,6 +27,8 @@ local Stats = require(script.Parent.Stats)
 local BossClient = require(script.Parent.Boss)
 local BossRoomClient = require(script.Parent.BossRoom)
 local Super = require(script.Parent.Super)
+local SwordCombat = require(script.Parent.SwordCombat)
+local Shidori = require(script.Parent.Shidori)
 local Ui = require(script.Parent.Ui)
 local Windows = require(script.Parent.Windows)
 
@@ -496,17 +498,45 @@ local function buildMounts()
 end
 
 ---------------------------------------------------------------------------------------------------
--- Índice: todos os personagens do Config; os que ainda não saíram ficam em silhueta.
+-- Índice: uma aba por mundo (Config.IndexByWorld); os que ainda não saíram ficam em silhueta.
+-- Os cartões de uma aba só são montados quando ela abre pela primeira vez.
 
 type IndexCard = { frame: Frame, viewport: ViewportFrame, name: TextLabel, income: TextLabel, found: boolean?, level: number? }
+type IndexTab = { grid: ScrollingFrame, button: TextButton, stroke: UIStroke, built: boolean }
 
 local indexCards: { [string]: IndexCard } = {}
+local indexTabs: { [number]: IndexTab } = {}
+local indexWorld = 1
 local indexCount: TextLabel
 local indexFound = 0
+
+local function buildIndexCards(worldId: number)
+	local tab = indexTabs[worldId]
+	if tab.built then
+		return
+	end
+	tab.built = true
+	for order, info in Config.IndexByWorld[worldId] do
+		local frame = card(tab.grid, info.id, order, EMPTY)
+		local viewport = viewportIn(frame, 76)
+		CharacterModels.render(viewport, info.id)
+		local name = fitted(frame, "Name", "???", 76, 26, 14)
+		fitted(frame, "Rarity", string.upper(Config.Rarities[info.rarity].id), 102, 18, 13, Config.Rarities[info.rarity].color)
+		local income = fitted(frame, "Income", "?", 120, 22, 16, P.money)
+		indexCards[info.id] = { frame = frame, viewport = viewport, name = name, income = income, found = nil }
+	end
+end
 
 local function refreshIndex()
 	if not Windows.isOpen("Index") then
 		return
+	end
+	buildIndexCards(indexWorld)
+	for id, tab in indexTabs do
+		local active = id == indexWorld
+		tab.grid.Visible = active
+		tab.stroke.Color = if active then Ui.white else P.outline
+		tab.button.BackgroundTransparency = if active then 0 else 0.45
 	end
 	local found: { [string]: boolean } = {}
 	for _, id in list("Index") do
@@ -521,7 +551,8 @@ local function refreshIndex()
 		end
 	end
 	indexFound = 0
-	for _, info in Config.Characters do
+	local shown = Config.IndexByWorld[indexWorld]
+	for _, info in shown do
 		local entry = indexCards[info.id]
 		local has = found[info.id] == true
 		local level = levels[info.id] or 1
@@ -537,21 +568,42 @@ local function refreshIndex()
 			entry.income.Text = if has then `Lv {level}  ${Format.abbreviate(Config.fighterIncome(info.id, level))}/s` else "?"
 		end
 	end
-	indexCount.Text = `{indexFound}/{#Config.Characters} FOUND`
+	indexCount.Text = `{indexFound}/{#shown} FOUND`
+end
+
+local function selectIndexWorld(worldId: number)
+	if indexTabs[worldId] then
+		indexWorld = worldId
+		refreshIndex()
+	end
 end
 
 local function buildIndex()
 	local window = Windows.create("Index", "INDEX", Vector2.new(640, 460), Color3.fromRGB(40, 130, 240), refreshIndex)
-	indexCount = Ui.text(window, { name = "Count", text = "", color = MUTED, size = UDim2.fromOffset(260, 24), position = UDim2.fromOffset(22, 14), textSize = 20, stroke = 3, align = Enum.TextXAlignment.Left })
-	local grid = gridArea(window, 44, 18, Vector2.new(104, 146))
-	for order, info in Config.Characters do
-		local frame = card(grid, info.id, order, EMPTY)
-		local viewport = viewportIn(frame, 76)
-		CharacterModels.render(viewport, info.id)
-		local name = fitted(frame, "Name", "???", 76, 26, 14)
-		fitted(frame, "Rarity", string.upper(Config.Rarities[info.rarity].id), 102, 18, 13, Config.Rarities[info.rarity].color)
-		local income = fitted(frame, "Income", "?", 120, 22, 16, P.money)
-		indexCards[info.id] = { frame = frame, viewport = viewport, name = name, income = income, found = nil }
+	indexCount = Ui.text(window, { name = "Count", text = "", color = MUTED, size = UDim2.fromOffset(200, 24), position = UDim2.fromOffset(22, 48), textSize = 20, stroke = 3, align = Enum.TextXAlignment.Left })
+	-- abas dos mundos, numa linha abaixo do título (o contador fica à esquerda dela)
+	local tabWidth, tabGap = 168, 8
+	for order, world in Config.Worlds do
+		local button = Instance.new("TextButton")
+		button.Name = "Tab" .. world.id
+		button.AnchorPoint = Vector2.new(1, 0)
+		button.Position = UDim2.new(1, -20 - (#Config.Worlds - order) * (tabWidth + tabGap), 0, 44)
+		button.Size = UDim2.fromOffset(tabWidth, 32)
+		button.BackgroundColor3 = world.color
+		button.Text = ""
+		button.AutoButtonColor = false
+		Ui.corner(button, 10)
+		local stroke = Ui.border(button, 3)
+		Ui.juice(button)
+		Ui.text(button, { name = "Label", text = world.index, size = UDim2.fromScale(1, 1), textSize = 17, stroke = 2 })
+		button.Activated:Connect(function()
+			selectIndexWorld(world.id)
+		end)
+		button.Parent = window
+		local grid = gridArea(window, 84, 18, Vector2.new(104, 146))
+		grid.Name = "Grid" .. world.id
+		grid.Visible = world.id == indexWorld
+		indexTabs[world.id] = { grid = grid, button = button, stroke = stroke, built = false }
 	end
 	player:GetAttributeChangedSignal("Index"):Connect(refreshIndex)
 	player:GetAttributeChangedSignal("Levels"):Connect(refreshIndex)
@@ -679,6 +731,14 @@ local function buildShop()
 		potionCards[info.id] = { status = status, price = price, border = border }
 	end
 	player:GetAttributeChangedSignal("Boosts"):Connect(refreshShop)
+end
+
+-- Aviso do balcão: o painel e a câmera desviam do balcão, venha o jogador de que lado vier.
+local function openPotionShop(prompt: ProximityPrompt)
+	if prompt.Name == "PotionShop" and not Windows.isOpen("Potions") then
+		local house = prompt:FindFirstAncestor("Sanctum")
+		Windows.toggle("Potions", house and house:FindFirstChild("PotionShop") or prompt.Parent)
+	end
 end
 
 -- Rebirth -----------------------------------------------------------------------------------------
@@ -963,6 +1023,11 @@ local function testHook()
 			return Worlds.debug()
 		elseif command == "toggle" then
 			Windows.toggle(arg)
+		elseif command == "health" then
+			return Hud.healthText()
+		elseif command == "indexTab" then
+			selectIndexWorld(arg)
+			return indexWorld
 		elseif command == "bossState" then
 			return BossRoomClient.debug()
 		elseif command == "golem" then
@@ -972,6 +1037,14 @@ local function testHook()
 			return true
 		elseif command == "panel" then
 			return Windows.debug()
+		elseif command == "potionShop" then
+			-- como se o jogador apertasse o aviso do balcão
+			local body = workspace:FindFirstChild("ShopBody", true)
+			local prompt = body and body:FindFirstChild("PotionShop")
+			if prompt and prompt:IsA("ProximityPrompt") then
+				openPotionShop(prompt)
+			end
+			return Windows.isOpen("Potions")
 		elseif command == "autoToggle" then
 			Auto.toggle(arg)
 			return Auto.isOn(arg)
@@ -1012,6 +1085,10 @@ local function testHook()
 			return Pose.syncDebug()
 		elseif command == "auraState" then
 			return Aura.debug()
+		elseif command == "swordCombat" then
+			return SwordCombat.test(arg)
+		elseif command == "shidori" then
+			return Shidori.test(arg)
 		elseif command == "mountState" then
 			return Mount.debug()
 		elseif command == "dash" then
@@ -1081,9 +1158,13 @@ local function testHook()
 				floor = if humanoid then humanoid.FloorMaterial.Name else "",
 			}
 		end
-		local visible = 0
-		for _, entry in indexCards do
-			if entry.found then
+		local visible, built = 0, 0
+		for _ in indexCards do
+			built += 1
+		end
+		for _, info in Config.IndexByWorld[indexWorld] do
+			local entry = indexCards[info.id]
+			if entry and entry.found then
 				visible += 1
 			end
 		end
@@ -1098,8 +1179,10 @@ local function testHook()
 			quest = if Windows.isOpen("Daily") then questRows[1].button.Text .. " " .. questRows[1].progress.Text else "",
 			potion = if Windows.isOpen("Potions") then potionCards.power.status.Text else "",
 			playtime = if playtimeCards[1] then playtimeCards[1].status.Text else "",
-			indexCards = #Config.Characters,
+			indexCards = #Config.IndexByWorld[indexWorld],
 			indexFound = visible,
+			indexWorld = indexWorld,
+			indexBuilt = built,
 			indexCount = indexCount.Text,
 		}
 	end
@@ -1124,11 +1207,7 @@ function Menus.start()
 		end)
 	end
 	-- balcão de poções da casa de feitiçaria
-	game:GetService("ProximityPromptService").PromptTriggered:Connect(function(prompt)
-		if prompt.Name == "PotionShop" and not Windows.isOpen("Potions") then
-			Windows.toggle("Potions")
-		end
-	end)
+	game:GetService("ProximityPromptService").PromptTriggered:Connect(openPotionShop)
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and input.KeyCode == Enum.KeyCode.G then
 			Windows.toggle("Backpack")

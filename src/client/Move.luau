@@ -66,6 +66,9 @@ local function parts(): (Humanoid?, BasePart?, Model?)
 	return nil, nil, nil
 end
 
+-- Fração da velocidade (o golpe da espada pesada deixa o boneco lento; SwordCombat).
+Move.speedScale = 1
+
 -- Velocidade de caminhada com o atributo SPEED comprado no painel.
 function Move.walkSpeed(): number
 	local level = player:GetAttribute("Stat_speed")
@@ -407,7 +410,7 @@ function Move.start()
 
 		local wantSprint = moving and (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or movingFor > AUTO_SPRINT_AFTER)
 		sprintAlpha += ((if wantSprint then 1 else 0) - sprintAlpha) * (1 - math.exp(-6 * dt))
-		humanoid.WalkSpeed = walk + (sprintSpeed - walk) * sprintAlpha
+		humanoid.WalkSpeed = (walk + (sprintSpeed - walk) * sprintAlpha) * Move.speedScale
 		Pose.weight("sprint", if sprintAlpha > 0.5 and grounded and not dashing then 1 else 0)
 		Aura.setSprint(sprintAlpha)
 		local fast = math.max(sprintAlpha, if dashing then 1.4 else 0)

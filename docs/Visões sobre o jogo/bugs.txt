@@ -1,0 +1,19 @@
+botão de pega dinheiro não pega quanto está em cima do skate e tapete
+
+os personagens do 2 mundo não devem ser de black clover, mas eles deve aparece no index em outra aba.
+
+no caldeirão, as vezes quando abrimos o painel ele fica dentro do caldeirão, então
+quando o player for clicar para interagir com ele faça ele girar automaticamente a camera, 
+a fim de evitar de o painel aparece dentro da estrutura.
+
+sala do boss de magma brilhosa dms, além de está com o mesmo boss, planejo fazer outro boss, outro modelo 3d, com outros ataques
+
+o nivel de poder deve ter relação com o dano que o player dá no boss, além da arvore de skills tbm tem q ter um parâmetro para sorte e outro para defesa, para o player aguentar mais porrada
+
+boss muito facil, existe um macete para ganhar dele, basta o player correr em circulos e segurar o botão de bater, ele não acerta ataques, o players mata se dificuldades. Cria um jeito de evitar isso, tipo uma explosão que da muito dano caso o jogador faça isso. Mas é fundamental q vc crie um jeito de validar q essa tática está sendo usado, tipo
+- vc reconhece o movimento circular o player;
+- valida se é isso mesmo;
+- ai aplica a explosão q pune ele.
+
+Agora q a luta contra o boss está limitada por player, faça um botão para criar partys de até 5 pessoas, assim eles cria o grupo e pode enfrentar o boss em conjunto, mas o boss tbm tem q aumentar a dificuldade de acordo com a quantidade de pessoas na party, aumentando a quantidade de vida, dano e a frequencia dos ataques.
+

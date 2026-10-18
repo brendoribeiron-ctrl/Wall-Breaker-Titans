@@ -268,8 +268,8 @@ Config.VolcanoWalls = {
 --   hallway  = nome da pasta da pista no Workspace (o cliente procura as paredes nela)
 --   plots    = nome da pasta dos terrenos desse mundo no Workspace
 Config.Worlds = {
-	{ id = 1, name = "MEADOW", rebirths = 0, offset = Vector3.zero, walls = Config.Walls, hallway = "Hallway", plots = "Plots", suffix = "", incomeMultiplier = 1, color = Color3.fromRGB(63, 196, 30) },
-	{ id = 2, name = "VOLCANO", rebirths = 1, offset = Vector3.new(9000, 0, 0), walls = Config.VolcanoWalls, hallway = "VolcanoHallway", plots = "VolcanoPlots", suffix = "_magma", incomeMultiplier = 10, prefix = "Magma ", color = Color3.fromRGB(255, 110, 30) },
+	{ id = 1, name = "MEADOW", rebirths = 0, offset = Vector3.zero, walls = Config.Walls, hallway = "Hallway", plots = "Plots", index = "BLACK CLOVER", suffix = "", incomeMultiplier = 1, color = Color3.fromRGB(63, 196, 30) },
+	{ id = 2, name = "VOLCANO", rebirths = 1, offset = Vector3.new(9000, 0, 0), walls = Config.VolcanoWalls, hallway = "VolcanoHallway", plots = "VolcanoPlots", index = "VOLCANO", suffix = "_magma", incomeMultiplier = 10, prefix = "Magma ", color = Color3.fromRGB(255, 110, 30) },
 }
 
 -- Mundo em que o jogador está agora (atributo "World", posto pelo servidor).
@@ -348,7 +348,7 @@ Config.BossRoom = {
 Config.Boss = {
 	names = { "THE SLUMBERING COLOSSUS", "THE MAGMA COLOSSUS" },
 	scale = 1.5, -- o modelo tem ~32 studs de altura; no jogo, ~48 (o tamanho da sala pede)
-	hp = { 80, 110 }, -- socos por jogador na luta, por mundo (crítico conta 2)
+	-- A vida e o dano da luta não ficam aqui: vêm de Config.Bosses e Config.Combat (CombatBalance.luau).
 	hitRange = 21, -- distância horizontal máxima do jogador ao centro do golem para o soco contar
 	hitCooldown = 0.22,
 	radius = 7, -- corpo do golem (colisão)
@@ -374,8 +374,104 @@ Config.Boss = {
 	-- EXPERIMENTOS (src/shared/GolemExperiment.luau): golpes com animação nova
 	-- (tools/blender/golem_v2.py) e efeitos novos (src/client/BossFx<Clip>.luau). false = volta ao
 	-- golpe original. Dano, raio e alcance continuam os de attacks; só muda o tempo até o impacto.
+	-- Poder ganho por soco no golem = socos cheios (1; o crítico vale 2) x Poder de um soco no saco
+	-- (nível atual) x isto, com os mesmos multiplicadores do saco (aura, rebirth, poção, amigos).
+	-- Não depende do dano em vida, que cresce com o Poder (Config.Combat). 0 desliga.
+	powerPerDamage = 1,
+	-- Sorteio da vitória: a sorte do jogador (poção x skill LUCK) vezes isto, do Raro para cima.
+	victoryLuck = 1.5,
+	-- Pena (pity): a cada `pity` vitórias num mundo, o sorteio vira o melhor personagem dele
+	-- (Config.bestCharacter). O contador é por mundo e zera quando esse personagem sai, garantido ou não.
+	pity = 30,
 	slamV2 = true, -- Esmagamento de Punhos: impacto em 1,10 s (era 1,03 s)
 	chargeV2 = true, -- gancho da corrida: impacto em 0,60 s (era 0,57 s)
+}
+
+-- Balanceamento do combate contra chefes (fórmulas em src/shared/CombatBalance.luau).
+--   dano do soco = baseDamage x mult(Poder do jogador / Poder mínimo do chefe)   (crítico x critMultiplier)
+--   vida do chefe = baseDamage x socos/s de referência x (1 + chance de crítico de referência) x ttk
+-- Ou seja: com o Poder mínimo e o crítico base, a luta dura `ttk` segundos; mais Poder, mais dano.
+-- Não há limite de tempo na luta: o TTK é só o tempo esperado, o chefe não "estoura" o jogador.
+Config.Combat = {
+	baseDamage = 10, -- vida tirada por soco com o Poder mínimo do chefe (unidade de vida)
+	critMultiplier = 2, -- o crítico no chefe vale o dobro do soco
+	hitsPerSecond = 4, -- socos/s de referência: segurando o botão (1 / Config.Bag.holdInterval)
+	critChance = 0.04, -- chance de crítico de referência (a base; skills deixam a luta mais curta)
+	-- Curva do dano: { Poder / Poder mínimo, multiplicador do dano }. Com ttk 60 s: 50K = 60 s,
+	-- 75K = 40 s, 100K = 20 s (o TTK cai com 1 / multiplicador). Entre os pontos é linear.
+	curve = { { 1, 1 }, { 1.5, 1.5 }, { 2, 3 } },
+	minMult = 0.25, -- abaixo do Poder mínimo o dano cai proporcional, mas nunca abaixo disto
+	maxMult = 6, -- teto do multiplicador (acima da curva ele sobe com a inclinação do último trecho)
+	-- false: qualquer um desafia o chefe (como antes); true: exige o Poder mínimo do chefe.
+	enforceEntry = false,
+}
+
+-- Combo M1 da espada do Asta (só dev). Os golpes e seus tempos estão em src/shared/SwordMoves.luau;
+-- aqui fica o que se balanceia. damage = múltiplos do dano de um soco no chefe (mesma fórmula de
+-- CombatBalance.punchDamage, mesmo crítico): o combo inteiro (~2,7 s) tira ~9 socos.
+Config.Sword = {
+	size = 1.4, -- escala da espada na mão (1 = modelo do Blender, 4,9 studs; vezes a altura do avatar)
+	floorMargin = 0.3, -- studs: a ponta nunca desce mais que isto do chão (a lâmina é levantada)
+	damage = { 2.4, 2.6, 4 }, -- por golpe: corte diagonal, varredura, golpe final
+	bodyMargin = 2.5, -- studs a mais no raio do corpo do chefe para a lâmina contar
+	finisherRest = 0.3, -- s parado depois do golpe final antes de recomeçar o combo
+	moveScale = 0.35, -- fração da velocidade de caminhada durante o golpe (arma pesada)
+	turnSpeed = 10, -- quão rápido o corpo vira para o alvo durante o preparo (1/s)
+	hitstop = 0.06, -- s que o golpe "trava" quando acerta (só visual, no cliente)
+	tolerance = 0.12, -- folga de tempo (s) que o servidor dá para atraso de rede ao encadear
+}
+
+-- Estamina (servidor manda; o cliente vê o atributo "Stamina"). Hoje só o Shidori gasta.
+-- Regeneração escolhida em 18/10 (o jogo não tinha estamina): de vazio a cheio em 10 s, começando
+-- 1 s depois do último gasto. Com o Shidori (50 por uso, recarga de 7 s) dá para usar 2 seguidos
+-- e depois 1 a cada 7 s, sem a estamina limitar mais que a recarga.
+Config.Stamina = {
+	max = 100,
+	regenPerSecond = 10,
+	regenDelay = 1, -- s sem regenerar depois de gastar
+}
+
+-- Shidori (habilidade elétrica na mão esquerda; servidor: src/server/Shidori.luau; cliente:
+-- src/client/Shidori.luau + ShidoriFx.luau; poses: src/shared/ShidoriMoves.luau). Desbloqueio:
+-- nó "shidori" da árvore de skills (Config.Stats.shidori).
+Config.Shidori = {
+	key = Enum.KeyCode.Z,
+	gamepad = Enum.KeyCode.ButtonY,
+	cost = 50, -- estamina por ativação
+	cooldown = 7, -- s, contados do início da ativação
+	damage = 1.6, -- múltiplos do dano de um soco M1 (o mesmo deal() do Boss; crítico depois, uma vez)
+	-- tempos das fases (s desde o início): preparo, acúmulo, explosão de luz, investida e recuperação.
+	-- As poses e os efeitos seguem estes números (ShidoriMoves usa os mesmos).
+	prep = 0.22, -- fim do preparo (o braço esquerdo desce e o corpo abaixa)
+	charge = 0.78, -- fim do acúmulo (a energia cresce na mão)
+	burst = 0.9, -- explosão de luz: a energia chega à forma principal
+	strike = 1.08, -- palma à frente (pico da investida)
+	hit = { 0.98, 1.24 }, -- janela de dano (tempo da pose)
+	-- folga no fim da janela, no servidor: a posição do boneco chega do cliente atrasada (rede +
+	-- replicação); no Studio a investida chegou ~0,3 s depois do tempo da pose (18/10)
+	tolerance = 0.35,
+	recover = 1.62, -- fim da recuperação (volta ao normal)
+	lunge = 34, -- studs/s da investida (cliente; o servidor confere o alcance)
+	lungeTime = { 0.92, 1.16 },
+	reach = 5, -- studs da mão até a superfície do chefe para contar
+	moveScale = 0.15, -- fração da caminhada durante o acúmulo
+}
+
+-- Os chefes, em ordem de dificuldade. minPower: Poder mínimo recomendado (1,5x o do anterior);
+-- ttk: segundos para vencer com esse Poder; hpScale/curve: ajustes de um chefe específico (opcionais).
+-- O chefe de cada mundo é o de mesmo índice (Config.Worlds[n].id). Adicionar um chefe = uma linha.
+-- Os nomes de 3 a 10 são provisórios (modelos novos virão).
+Config.Bosses = {
+	{ id = 1, name = "THE SLUMBERING COLOSSUS", minPower = 50_000, ttk = 60 },
+	{ id = 2, name = "THE MAGMA COLOSSUS", minPower = 75_000, ttk = 60 },
+	{ id = 3, name = "BOSS 3", minPower = 112_500, ttk = 60 },
+	{ id = 4, name = "BOSS 4", minPower = 168_750, ttk = 60 },
+	{ id = 5, name = "BOSS 5", minPower = 253_125, ttk = 60 },
+	{ id = 6, name = "BOSS 6", minPower = 379_688, ttk = 60 },
+	{ id = 7, name = "BOSS 7", minPower = 569_531, ttk = 60 },
+	{ id = 8, name = "BOSS 8", minPower = 854_297, ttk = 60 },
+	{ id = 9, name = "BOSS 9", minPower = 1_281_445, ttk = 60 },
+	{ id = 10, name = "BOSS 10", minPower = 1_922_168, ttk = 60 },
 }
 
 -- Modelos de Shared.Assets que não são cenário espalhado (cada um tem o próprio módulo).
@@ -395,6 +491,7 @@ Config.Roll = {
 		{ 8, 24, 36, 22, 8.8, 1.2 },
 	},
 	luckFrom = 3, -- primeira raridade que a sorte multiplica (Rare)
+	maxLuck = 3, -- teto da sorte do jogador (poção x skill LUCK; hoje no máximo 2 x 1,5 = 3)
 	wallLuckPower = 0.5, -- quanto a sorte da parede pesa dentro do tier (raiz da razão)
 }
 
@@ -521,6 +618,7 @@ Config.Panel = {
 	openTwist = 55, -- graus que o painel nasce virado de lado
 	maxTilt = 7, -- inclinação máxima seguindo o cursor, em graus
 	tiltSpeed = 9, -- quão rápido a inclinação segue o cursor
+	clearance = 0.6, -- ao abrir perto de um objeto (balcão de poções): folga entre ele e o painel/câmera
 	leash = 7, -- o painel fecha se o boneco se afastar mais que isto de onde abriu
 	armIdle = 3, -- segundos com o cursor parado até o braço descer
 	armDrop = 0.5, -- o braço aponta este tanto abaixo do cursor, para a mão não cobrir o clique
@@ -548,9 +646,27 @@ Config.Stats = {
 	speed = { label = "SPEED", unit = "walk speed", max = 10, baseCost = 150, growth = 2.2, perLevel = 3 },
 	critChance = { label = "CRIT CHANCE", unit = "% chance", max = 10, baseCost = 400, growth = 2.2, perLevel = 0.016 },
 	critDamage = { label = "CRIT DAMAGE", unit = "x power", max = 10, baseCost = 600, growth = 2.2, perLevel = 1 },
+	-- sorte do sorteio de personagem: +5% por nível, multiplica a poção (teto em Config.Roll.maxLuck)
+	luck = { label = "LUCK", unit = "x luck", max = 10, baseCost = 500, growth = 2.2, perLevel = 0.05 },
+	-- corta o dano recebido do golem: 4% por nível (teto em Config.Defense.maxReduction)
+	defense = { label = "DEFENSE", unit = "% less damage", max = 10, baseCost = 450, growth = 2.2, perLevel = 0.04 },
+	-- vida máxima: +perLevel por nível em cima de Config.Health.base
+	health = { label = "HEALTH", unit = "max HP", max = 10, baseCost = 400, growth = 2.2, perLevel = 20 },
+	-- habilidade: um nó só (desbloqueia o Shidori, tecla Z; números em Config.Shidori)
+	shidori = { label = "SHIDORI", unit = "", max = 1, baseCost = 1500, growth = 1, perLevel = 1 },
+}
+-- Vida do jogador: base sem skill (o servidor põe no Humanoid.MaxHealth; o HUD mostra o número).
+Config.Health = {
+	base = 100,
+}
+-- Defesa: dano recebido = dano do golpe (já com a raiva) x (1 - redução), com
+-- redução = nível x perLevel, nunca acima de maxReduction; o golpe tira pelo menos minDamage.
+Config.Defense = {
+	maxReduction = 0.5,
+	minDamage = 1,
 }
 Config.StatWorldCap = 0.3 -- parte do máximo de cada skill que dá para comprar antes do mundo 2
-Config.StatOrder = { "speed", "critChance", "critDamage" }
+Config.StatOrder = { "speed", "critChance", "critDamage", "luck", "defense", "health", "shidori" }
 
 -- Até que nível a skill pode ir com estes rebirths.
 function Config.statCap(name: string, rebirths: number): number
@@ -559,6 +675,26 @@ function Config.statCap(name: string, rebirths: number): number
 		return stat.max
 	end
 	return math.ceil(stat.max * Config.StatWorldCap)
+end
+
+-- Multiplicador de sorte da skill LUCK no nível `level`.
+function Config.luckFromStat(level: number): number
+	return 1 + level * Config.Stats.luck.perLevel
+end
+
+-- Parte do dano que a skill DEFENSE corta no nível `level`.
+function Config.defenseReduction(level: number): number
+	return math.clamp(level * Config.Stats.defense.perLevel, 0, Config.Defense.maxReduction)
+end
+
+-- Vida máxima com a skill HEALTH no nível `level`.
+function Config.maxHealth(level: number): number
+	return Config.Health.base + level * Config.Stats.health.perLevel
+end
+
+-- Dano final de um golpe de `amount` em quem tem DEFENSE no nível `level`.
+function Config.defendedDamage(amount: number, level: number): number
+	return math.max(math.floor(amount * (1 - Config.defenseReduction(level)) + 0.5), Config.Defense.minDamage)
 end
 
 function Config.statCost(name: string, level: number): number
@@ -747,7 +883,7 @@ for _, info in Config.Characters do
 	Config.CharacterById[info.id] = info
 end
 -- Versão de cada mundo seguinte (sorteada nas pistas dele): mesmo personagem, feito de rocha e
--- lava, com a renda multiplicada. Não entra no INDEX.
+-- lava, com a renda multiplicada. Fica na aba do mundo dele no INDEX.
 local LAVA, ASH = rgb(255, 110, 20), rgb(48, 30, 34)
 local everyone = table.clone(Config.Characters)
 for _, world in Config.Worlds do
@@ -765,6 +901,26 @@ for _, world in Config.Worlds do
 			table.insert(everyone, variant)
 		end
 	end
+end
+-- INDEX: uma aba por mundo (título em world.index) com os personagens sorteados nas pistas dele.
+-- Os de Black Clover ficam no mundo 1; as versões de magma, na aba do vulcão.
+Config.IndexByWorld = {}
+for _, world in Config.Worlds do
+	Config.IndexByWorld[world.id] = {}
+end
+for _, info in everyone do
+	table.insert(Config.IndexByWorld[info.world or 1], info)
+end
+
+-- Melhor personagem de um mundo (o da pena do chefe): maior raridade, depois maior renda.
+function Config.bestCharacter(world: any): string
+	local best = Config.Characters[1]
+	for _, info in Config.Characters do
+		if info.rarity > best.rarity or (info.rarity == best.rarity and info.income > best.income) then
+			best = info
+		end
+	end
+	return best.id .. world.suffix
 end
 -- Versão Shiny de cada personagem (só por fusão): não entra no sorteio nem no INDEX.
 local GOLD = rgb(255, 205, 60)

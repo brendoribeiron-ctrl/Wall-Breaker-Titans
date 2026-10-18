@@ -50,5 +50,57 @@
 	"wave": {
 		"assetId": "111724593846535",
 		"hash": "4e0fbaae53e358d60ab51dbafb95d3113ecd463c"
+	},
+	"asta_blade": {
+		"assetId": "138762528046172",
+		"hash": "ebeea5c8a4a8eba692eb5a862a97513deb3e9358"
+	},
+	"blade_flow": {
+		"assetId": "71676306673050",
+		"hash": "b221f5ea4f0f18caf675a9d65fcbbf85016f78c1"
+	},
+	"bolt": {
+		"assetId": "139431042619890",
+		"hash": "2c6ed99de9dcf52301f07e34f9001d4108128f53"
+	},
+	"energy_body": {
+		"assetId": "73288021600277",
+		"hash": "7154b9777240d0154f202557ee2b28902f642cab"
+	},
+	"energy_core": {
+		"assetId": "111820081227846",
+		"hash": "ff87ccc0ea842a2834cd9ec996236a266e82919a"
+	},
+	"energy_trail": {
+		"assetId": "111388686345317",
+		"hash": "ac2063b3e4cac7b8840baf4c54027b6856cd02ea"
+	},
+	"ring_glow": {
+		"assetId": "125616873860404",
+		"hash": "46362289ce6ad8b7caa40020e472f4033d30a13d"
+	},
+	"spark": {
+		"assetId": "133378763057072",
+		"hash": "872615cd2715d71f093ca10dfbbcb420760e6e88"
+	},
+	"energy_profile": {
+		"assetId": "77041224483843",
+		"hash": "c0eb3663e7a7c6a045ed11acc8f54fbb38aa57c1"
+	},
+	"slash_streaks": {
+		"assetId": "92861023334155",
+		"hash": "392994882a811043108797fb63f878107244e783"
+	},
+	"band_body_x": {
+		"assetId": "115727578892829",
+		"hash": "9f6c6b282d34f776679ed7a1dd70c7f6c73107b0"
+	},
+	"band_core_x": {
+		"assetId": "136281752342268",
+		"hash": "0548e891bef2e32ccb976ce824a2463cb5db5191"
+	},
+	"band_glow_x": {
+		"assetId": "121472882234369",
+		"hash": "6089835b2f4971510eedfab2437733f5712d14d4"
 	}
 }

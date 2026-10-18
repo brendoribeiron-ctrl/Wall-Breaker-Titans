@@ -71,6 +71,13 @@ function Pose.transform(joint: string): CFrame?
 	return if motor and motor.Parent then motor.Transform else nil
 end
 
+-- Ganchos que rodam depois de todas as camadas, no mesmo quadro (antes de mandar a pose aos
+-- outros). Recebem dt e as juntas; devolvem true se mexeram no boneco. Usado pelo IK da espada.
+local afters: { (number, { [string]: any }) -> boolean } = {}
+function Pose.after(fn: (number, { [string]: any }) -> boolean)
+	table.insert(afters, fn)
+end
+
 function Pose.current(name: string): number
 	local layer = layers[name]
 	return if layer then layer.weight else 0
@@ -306,6 +313,12 @@ function Pose.start()
 						end
 					end
 				end
+			end
+		end
+
+		for _, fn in afters do
+			if fn(dt, motors) then
+				active = true
 			end
 		end
 

@@ -382,7 +382,11 @@ end
 -- O servidor manda o personagem sorteado na vitória contra o chefe.
 task.spawn(function()
 	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("BossReward") :: RemoteEvent
-	remote.OnClientEvent:Connect(function(characterId: string, isNew: boolean)
+	remote.OnClientEvent:Connect(function(characterId: string, isNew: boolean, pity: boolean?)
+		if pity then
+			-- pena do chefe: o melhor personagem do mundo veio garantido
+			Fx.toast(`{Config.Boss.pity} BOSSES DEFEATED: GUARANTEED!`, Color3.fromRGB(255, 214, 40))
+		end
 		Roll.play(characterId, isNew)
 	end)
 end)

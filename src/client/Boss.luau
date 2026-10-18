@@ -311,7 +311,20 @@ local bar: Frame? = nil
 local fill: Frame? = nil
 local chip: Frame? = nil
 local title: TextLabel? = nil
+local pityLabel: TextLabel? = nil
 local shownHp = -1
+
+-- Vitórias no chefe do mundo `worldId` desde a última pena (atributo "BossWins": "1:12,2:3").
+local function bossWins(worldId: number): number
+	local raw = player:GetAttribute("BossWins")
+	for _, pair in string.split(if type(raw) == "string" then raw else "", ",") do
+		local id, wins = string.match(pair, "^(%d+):(%d+)$")
+		if tonumber(id) == worldId then
+			return tonumber(wins) :: number
+		end
+	end
+	return 0
+end
 
 local function makeBar()
 	local gui = Instance.new("ScreenGui")
@@ -331,6 +344,8 @@ local function makeBar()
 	local f = Ui.frame(back, "Fill", UDim2.fromScale(1, 1), nil, Color3.fromRGB(200, 30, 30))
 	Ui.corner(f, 4)
 	Ui.gradient(f, Color3.fromRGB(255, 90, 70), Color3.fromRGB(150, 10, 20))
+	-- pena: quantas vitórias faltam para o melhor personagem do mundo vir garantido
+	pityLabel = Ui.text(holder, { name = "Pity", text = "", color = Color3.fromRGB(255, 214, 40), size = UDim2.new(1, 0, 0, 20), position = UDim2.fromOffset(0, 54), textSize = 17, stroke = 2 })
 	bar, fill, chip, title = holder, f, c, name
 end
 
@@ -350,6 +365,11 @@ local function updateBar()
 	local hp = rig.server:GetAttribute("Hp") :: number? or 0
 	local maxHp = math.max(rig.server:GetAttribute("MaxHp") :: number? or 1, 1)
 	title.Text = rig.server:GetAttribute("Name") :: string? or "BOSS"
+	if pityLabel then
+		local world = Config.Worlds[rig.world] or Config.Worlds[1]
+		local best = Config.CharacterById[Config.bestCharacter(world)]
+		pityLabel.Text = `BOSS PITY {bossWins(world.id)}/{Config.Boss.pity}  ·  {string.upper(best.name)} GUARANTEED`
+	end
 	title.TextColor3 = if rig.server:GetAttribute("Rage") == true then Color3.fromRGB(255, 150, 120) else WHITE
 	if hp ~= shownHp then
 		if shownHp >= 0 and hp < shownHp and rig.highlight then
@@ -526,7 +546,7 @@ function Boss.start()
 		updateBar()
 	end)
 
-	bossRemote.OnClientEvent:Connect(function(kind: string, a: any, b: any)
+	bossRemote.OnClientEvent:Connect(function(kind: string, a: any, b: any, c: any)
 		if kind == "intro" then
 			task.spawn(intro, a)
 		elseif kind == "hit" then
@@ -539,8 +559,13 @@ function Boss.start()
 				local center = (rig.cf :: CFrame).Position + Vector3.new(0, 10 * S, 0)
 				local flat = Vector3.new(root.Position.X - center.X, 0, root.Position.Z - center.Z)
 				local dir = if flat.Magnitude > 0.1 then flat.Unit else Vector3.xAxis
-				BossFx.struck(center + dir * BOSS.radius * S + Vector3.new(0, -2, 0), dir, b == true, GLOW[rig.world] or GLOW[1])
+				local spot = center + dir * BOSS.radius * S + Vector3.new(0, -2, 0)
+				BossFx.struck(spot, dir, b == true, GLOW[rig.world] or GLOW[1])
 				Fx.shake(if b then 0.35 else 0.1)
+				-- Poder ganho pelo dano (Config.Boss.powerPerDamage)
+				if type(c) == "number" and c > 0 then
+					Bag.floatNumber(c, b == true, spot)
+				end
 			end
 		elseif kind == "victory" then
 			task.delay(2.6, Fx.title, "VICTORY", Color3.fromRGB(255, 214, 40), 1.6)
@@ -568,6 +593,7 @@ function Boss.debug(): { [string]: any }
 		crumbled = rig.crumbled,
 		position = rig.cf and rig.cf.Position,
 		bar = bar ~= nil and bar.Visible,
+		pity = if pityLabel then pityLabel.Text else "",
 		target = punchTarget() ~= nil,
 		head = rig.solved and pointOf(rig, "Head", Vector3.new(0, 25.4, -2.8) * S),
 		handR = rig.solved and pointOf(rig, "HandR", Vector3.new(10, 2, -1.5) * S),
