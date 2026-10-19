@@ -16,7 +16,7 @@ Voltar: [[INDEX]] · Relacionado: [[Jogador]] · Skills: `roblox-ui-juice`, `rob
 
 - Estamina (18/10): barra fina embaixo da vida (atributos `Stamina`/`StaminaMax`), só com o Shidori
   desbloqueado; fica apagada abaixo do custo. Botão `Shidori` (⚡, tecla Z, recarga em contagem) é filho
-  direto do HUD e bloco do editor (`HudLayout.BLOCKS`). Ver [[Jogador]].
+  direto do HUD e bloco do editor (`HudLayout.BLOCKS`). Ver [[Shidori]].
 
 ## Painel do balcão de poções (caldeirão)
 - Bug: o painel às vezes nascia dentro do caldeirão (o painel fica 2,6 à frente e 3,4 à direita do

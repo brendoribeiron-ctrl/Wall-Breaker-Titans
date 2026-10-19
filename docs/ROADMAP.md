@@ -51,7 +51,7 @@ Voltar: [[INDEX]] · O que **não foi verificado** fica na nota de cada sistema.
   olhar no jogo, outro jogador, rodar `sword_combat`. Ver [[VFX]].
 - Shidori (18/10): tecla Z, estamina nova, nó na árvore, poses, VFX/SFX, dano 1,6× do soco. Testado:
   `shidori` 34/34, `sword_combat`, `hud`, `sync`. Falta: celular de verdade, dois jogadores, R6,
-  desempenho, com a espada na mão. Ver [[Jogador]].
+  desempenho, com a espada na mão. Ver [[Shidori]].
 - Rastro da espada contínuo e vivo (18/10, quarta versão): arco redondo, sem dentes nem contas,
   halo, núcleo quente, cores vivas. Testado: capturas e gravações do combo nos meus Plays. Falta: o
   dono olhar e salvar o place, `sword_combat`, aura equipada, outro jogador. Ver [[VFX]].

@@ -42,15 +42,15 @@ parede quebrada. Personagens vão para pedestais do terreno e rendem dinheiro po
 - Layout do HUD editado no celular **não** vale no PC (17/10; ver [[HUD]]).
 - Chegar na parede de uma raridade não garante a raridade; Mítico raro até o fim (17/10; ver [[Economia]]).
 
-## Estado do Git (verificado em 17/10)
-- Branch de trabalho `feat/panels-super-auras` em `7cf1373`, **enviado** ao GitHub. A `main` (local e
-  remota) continua em `7c99025`. Branch local `backup/antes-sem-claude` (65eb9c7) guarda o histórico de
-  antes de tirar o `Co-Authored-By`.
-- As imagens `art/capa-1-corrida.png`, `capa-2-terreno.png`, `capa-3-carga.png` e `icone.png` foram
-  **apagadas pelo dono** em 16/10 (achou feias) e a exclusão entrou no commit `11ee231`. Ainda existem
-  em `7c99025` (main) e no branch de backup, se um dia precisar. Capa e ícone novos estão pendentes.
-- Sem commit no momento: o comando `/spawn` (`src/server/init.server.luau`, `src/server/tests/spawn.luau`)
-  e esta documentação.
+## Estado do Git (verificado em 18/10)
+- `main` (local e remota) continua em `7c99025`. Branch `feat/panels-super-auras` em `7cf1373`
+  (enviado). Branch `claude/project-thread-oad38f` com o commit `bb6c321` (Shidori, estamina, espada,
+  arte da página, `docs/`, `CLAUDE.md`, `PROMPT.md`), **enviado**, sem pull request aberto. Branch
+  local `backup/antes-sem-claude` (65eb9c7) guarda o histórico de antes de tirar o `Co-Authored-By`.
+- Fora do Git de propósito: `.env`, `copia.rbxl`, `/shots/`, `.obsidian/`, `.vscode/` e
+  `run_videos_para_skills/` (14 MB). Perguntar ao dono antes de incluir algum.
+- Página do jogo no Creator Hub (universo 10770483571): nome, descrição, gênero, ícone e a capa da
+  corrida já estão lá; faltam as capas do golem e da carga. Detalhes em `art/pagina-do-jogo.md`.
 
 ## Riscos
 - Personagens com nome e aparência de anime existente podem gerar denúncia de direitos autorais ou

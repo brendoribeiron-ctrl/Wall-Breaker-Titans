@@ -27,6 +27,16 @@ abriu. Scripts auxiliares (`play.cjs`, `syntax.cjs`, `sheet.ps1`) em
   utilitários (`setup_*`, `state`, `stop`, `tp`, `where`, `walk`, `give*`).
 - A regeneração de vida do Roblox mascara dano: destruir o script `Health` do boneco ou medir a menor vida.
 
+## Testes novos de 18/10
+- `tests/shidori.luau` (34 checagens do Shidori e da estamina) e `tests/shidori_show.luau` (captura:
+  `setup <ângulo> <distância>`, `freeze <t>`, `cast`); gravação a 30 qps: `shots/shidori/rec.sh`,
+  igual ao da espada (`shots/sword/m1/rec.sh`). TestHook `shidori`, TestUi `shidori`
+  (`press`, `freeze`, `aim`, `tweak`). Texturas de faixa: `node tools/vfx/band_textures.cjs <pasta>`.
+- Sons e imagens novas sobem pelo Studio MCP (`upload_image`) quando o `.env` está sem chave; gravar
+  o id à mão em `Textures.luau` e `uploaded.json`.
+- Playwright abre o Creator Hub (página do jogo), mas o navegador do app não envia arquivos e o
+  modo automático do agente recusa dirigir uma janela com a conta do dono logada.
+
 ## Capturas
 `powershell -File tools\screenshot.ps1 -Out <arquivo> [-Count N -IntervalMs M -DelayMs D] [-Window VfxLab]`
 pega a janela inteira do Studio (~0,2 s por quadro na prática); recortar o viewport e juntar em folha de

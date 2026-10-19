@@ -23,6 +23,11 @@ Obsidian = esta pasta). Comece por `docs/INDEX.md`.
 - Ao terminar uma tarefa que mude comportamento, decisão, bug ou pendência, **atualize o documento do
   sistema e o `docs/ROADMAP.md`**. Marque o que foi verificado e o que não foi. Não crie documento novo
   se um existente cobre o assunto; não copie histórico de conversa.
+- **Sempre** fecha a tarefa com esta checagem (pedido do dono, 18/10): (1) nota do sistema e ROADMAP
+  atualizados; (2) sistema novo e grande ganha nota própria em `docs/`, ligada no `docs/INDEX.md` e
+  com `[[links]]` de ida e volta; (3) `docs/Projeto.md` se mudou o estado do Git, da página ou as
+  decisões do dono; (4) `art/pagina-do-jogo.md` se mudaram teclas ou sistemas citados na descrição;
+  (5) olhar se alguma pasta ou nota ficou fora do lugar e dizer ao dono em vez de mover arquivos dele.
 - `E:\Projetos roblox\Contextos_foda\` guarda os contextos antigos (histórico). Consulte só se um doc
   apontar para lá. `fodao.md` dessa pasta não é base do projeto.
 

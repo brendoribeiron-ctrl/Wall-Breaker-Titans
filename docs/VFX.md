@@ -110,7 +110,7 @@ Voltar: [[INDEX]] · Relacionado: [[Bosses]], [[Jogador]], [[Ferramentas]] · Sk
 attachments inclinados, trocados a cada 0,04–0,1 s, maiores com a carga), faíscas, luz pulsando; na
 explosão, flash + risco horizontal virado para a câmera (`band_core_x`) + raios de 7 studs; rastro na
 mão na investida; acerto com flash, anel, faíscas, raios e luz. Sons: Pro Sound Effects da loja do
-Roblox (Electricity Static 1/7/18, Electric Whoosh). Referências vistas: `shots/shidori/ref` (3 TikToks).
+Roblox (Electricity Static 1/7/18, Electric Whoosh). Referências vistas: `shots/shidori/ref` (3 TikToks). Ver [[Shidori]].
 
 ## Regras que custaram tentativa
 - O jogo tem Bloom: cúpula de choque ou onda grande e clara viram um borrão branco que esconde tudo.
