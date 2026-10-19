@@ -9,7 +9,11 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Format = require(ReplicatedStorage.Shared.Format)
+local HudLayout = require(ReplicatedStorage.Shared.HudLayout)
 local RunMath = require(ReplicatedStorage.Shared.RunMath)
+local Admin = require(script.Admin)
+local CharacterMeshes = require(script.CharacterMeshes)
+local DevArea = require(script.DevArea)
 local Hall = require(script.Hall)
 local Pedestals = require(script.Pedestals)
 local Progress = require(script.Progress)
@@ -17,7 +21,11 @@ local PlayerData = require(script.PlayerData)
 local Run = require(script.Run)
 local Mounts = require(script.Mounts)
 local Sanctum = require(script.Sanctum)
+local Shidori = require(script.Shidori)
+local Stamina = require(script.Stamina)
 local Scenery = require(script.Scenery)
+local Sword = require(script.Sword)
+local SwordCombat = require(script.SwordCombat)
 local State = require(script.State)
 local Boss = require(script.Boss)
 local BossRoom = require(script.BossRoom)
@@ -33,13 +41,35 @@ local World = require(script.World)
 -- Super: S->C "start", senha, teclas | "result", acertou, ganho | "auto", ganho      C->S senha, acertou
 -- Auto: C->S "buy", nome | "toggle", nome, ligado
 -- Aura: C->S id da aura a equipar          Slot: C->S posição na mochila, slot rápido de destino
-State.createRemotes({ "BagHit", "Charge", "RunResult", "Select", "Fx", "Stat", "GoZone", "Super", "Auto", "Aura", "Slot", "Mount", "Cast", "Sell", "Rebirth", "Potion", "Daily", "Playtime", "Quest", "Fuse", "World", "BossReward", "Boss", "BossHit" })
+State.createRemotes({ "BagHit", "Charge", "RunResult", "Select", "Fx", "Stat", "GoZone", "Super", "Auto", "Aura", "Slot", "Mount", "Cast", "Sell", "Rebirth", "Potion", "Daily", "Playtime", "Quest", "Fuse", "World", "BossReward", "Boss", "BossHit", "HudLayout" })
 local remotes = State.remotes
 
 World.setupLighting()
 World.buildLobby()
 Hall.build(World.buildHallway())
 World.buildBounds()
+DevArea.start(Admin.isAdmin, State.homeCFrame)
+-- espada de antimagia do Asta: só dev, pelo comando /sword (sem remote)
+Sword.start(Admin.isAdmin, function(player, message)
+	remotes.Fx:FireClient(player, "toast", message)
+end)
+SwordCombat.start() -- combo M1 da espada (dano validado aqui)
+Stamina.start()
+Shidori.start() -- habilidade da tecla Z (estamina, recarga e dano validados aqui)
+-- modelos de anime dos personagens: quando chegam, refaz os pedestais de quem já entrou
+CharacterMeshes.load(function()
+	for _, player in Players:GetPlayers() do
+		local id = State.plotOf[player]
+		if id then
+			Pedestals.attach(player, State.plots[id])
+		end
+	end
+end)
+-- bonecos de trabalho das animações (tools/anim, Eclipse Animator) ficam só no modo de edição
+local animRigs = workspace:FindFirstChild("AnimRigs")
+if animRigs then
+	animRigs:Destroy()
+end
 -- os modelos vêm da Roblox (uma chamada por modelo): monta em paralelo, sem segurar o servidor
 task.spawn(function()
 	if Sanctum.build() then
@@ -169,9 +199,27 @@ local function headTag(player: Player, character: Model)
 	board.Parent = head
 end
 
+-- Vida máxima da skill HEALTH no boneco. Subir de nível soma a diferença à vida atual (comprar
+-- não cura nem fere); boneco novo nasce cheio.
+local function applyMaxHealth(player: Player, fresh: boolean?)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local level = player:GetAttribute("Stat_health")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local max = Config.maxHealth(if type(level) == "number" then level else 0)
+	local gained = max - humanoid.MaxHealth
+	humanoid.MaxHealth = max
+	humanoid.Health = if fresh then max else math.clamp(humanoid.Health + math.max(gained, 0), 1, max)
+end
+
 local function placeCharacter(player: Player, character: Model)
 	player:SetAttribute("World", 1) -- todo boneco novo nasce no terreno, no mundo 1
 	task.spawn(headTag, player, character)
+	if character:WaitForChild("Humanoid", 10) then
+		applyMaxHealth(player, true)
+	end
 	local plot = State.plot(player)
 	if not plot then
 		return
@@ -225,8 +273,9 @@ local function equipAura(player: Player, id: any): boolean
 	return true
 end
 
--- Montarias: o primeiro clique compra (uma vez, com dinheiro), os seguintes equipam; clicar na
--- que já está equipada desce dela. Devolve "bought", "on" ou "off".
+-- Montarias: no menu, o primeiro clique compra (uma vez, com dinheiro, e já sobe nela) e os
+-- seguintes só escolhem qual usar. Subir e descer é na tecla M (rideMount), atributo "Riding".
+-- Devolve "bought", "selected" ou nil.
 local function useMount(player: Player, id: any): string?
 	local profile = PlayerData.get(player)
 	local info = if type(id) == "string" then Config.MountById[id] else nil
@@ -234,10 +283,7 @@ local function useMount(player: Player, id: any): string?
 		return nil
 	end
 	if profile.mount == info.id then
-		PlayerData.update(player, function(p)
-			p.mount = ""
-		end)
-		return "off"
+		return "selected"
 	end
 	local bought = false
 	if not profile.mounts[info.id] then
@@ -254,7 +300,23 @@ local function useMount(player: Player, id: any): string?
 		end
 		p.mount = info.id
 	end)
-	return if bought then "bought" else "on"
+	if bought then
+		player:SetAttribute("Riding", true)
+	end
+	return if bought then "bought" else "selected"
+end
+
+-- Tecla M: sobe na montaria escolhida ou desce dela. Devolve se ficou montado (nil sem montaria).
+local function rideMount(player: Player): boolean?
+	local profile = PlayerData.get(player)
+	if not profile or profile.mount == "" then
+		player:SetAttribute("Riding", nil)
+		State.remotes.Fx:FireClient(player, "toast", "Pick a mount in MOUNTS first!")
+		return nil
+	end
+	local on = player:GetAttribute("Riding") ~= true
+	player:SetAttribute("Riding", if on then true else nil)
+	return on
 end
 
 -- Mochila: leva o personagem da posição `from` para o slot rápido `slot`, trocando de lugar
@@ -411,6 +473,10 @@ local function onPlayerAdded(player: Player)
 	player.CharacterAdded:Connect(function(character)
 		placeCharacter(player, character)
 	end)
+	-- compra, /giveall, /reset e testes mudam o nível pelo perfil, que replica neste atributo
+	player:GetAttributeChangedSignal("Stat_health"):Connect(function()
+		applyMaxHealth(player)
+	end)
 	if player.Character then
 		placeCharacter(player, player.Character)
 	end
@@ -501,6 +567,25 @@ local function tryHit(player: Player, forceCrit: boolean?): (number?, number?, b
 	Progress.count(player, "punch", 1)
 	local tierAfter = RunMath.powerTier(profile.power)
 	return gain, if tierAfter > tierBefore then tierAfter else nil, crit
+end
+
+-- Poder pelo dano no golem. Boss.punch só chama com dano válido (luta acordada, sala do jogador,
+-- alcance, ritmo e vida restante conferidos lá); o ganho segue Config.Boss.powerPerDamage.
+Boss.onDamage = function(player: Player, hits: number): number
+	local profile = PlayerData.get(player)
+	if not profile or hits <= 0 then
+		return 0
+	end
+	local base = Config.Bag.levels[profile.bagLevel].power * hits * Config.Boss.powerPerDamage
+	local gain = math.floor(base * powerMultiplier(profile) * Progress.powerBoost(player, profile))
+	if gain <= 0 then
+		return 0
+	end
+	PlayerData.update(player, function(p)
+		p.power += gain
+	end)
+	grantFirstAura(player)
+	return gain
 end
 
 -- Compra um nível de atributo com dinheiro.
@@ -693,7 +778,30 @@ end
 
 remotes.Stat.OnServerEvent:Connect(buyStat)
 remotes.Aura.OnServerEvent:Connect(equipAura)
-remotes.Mount.OnServerEvent:Connect(useMount)
+-- layout do HUD escolhido no editor do celular: só guarda o que passar pela validação
+local lastHudSave: { [Player]: number } = {}
+remotes.HudLayout.OnServerEvent:Connect(function(player: Player, text: any)
+	local now = os.clock()
+	if type(text) ~= "string" or #text > HudLayout.MAX_LENGTH or now - (lastHudSave[player] or 0) < 0.5 then
+		return
+	end
+	lastHudSave[player] = now
+	local clean = HudLayout.encode(HudLayout.decode(text))
+	PlayerData.update(player, function(p)
+		p.hud = clean
+	end)
+end)
+Players.PlayerRemoving:Connect(function(player)
+	lastHudSave[player] = nil
+end)
+-- Mount: C->S id da montaria (menu) | "ride" (tecla M, sobe/desce)
+remotes.Mount.OnServerEvent:Connect(function(player, id)
+	if id == "ride" then
+		rideMount(player)
+	else
+		useMount(player, id)
+	end
+end)
 remotes.Sell.OnServerEvent:Connect(sellCharacter)
 
 -- Progressão (src/server/Progress.luau)
@@ -910,35 +1018,7 @@ local function giveAll(player: Player): number
 	return #profile.inventory
 end
 
--- Quem é admin: todo mundo no Studio; no jogo publicado, o dono, quem está em Config.Admins
--- e, em jogo de grupo, quem tem o cargo de Config.AdminGroupRank para cima.
-local adminCache: { [number]: boolean } = {}
-local function isAdmin(player: Player): boolean
-	if RunService:IsStudio() then
-		return true
-	end
-	local cached = adminCache[player.UserId]
-	if cached ~= nil then
-		return cached
-	end
-	local admin = table.find(Config.Admins, player.UserId) ~= nil
-	if not admin then
-		if game.CreatorType == Enum.CreatorType.User then
-			admin = player.UserId == game.CreatorId
-		else
-			-- consulta à Roblox: pode falhar; nesse caso não é admin agora e tenta de novo depois
-			local ok, rank = pcall(function()
-				return player:GetRankInGroup(game.CreatorId)
-			end)
-			if not ok then
-				return false
-			end
-			admin = rank >= Config.AdminGroupRank
-		end
-	end
-	adminCache[player.UserId] = admin
-	return admin
-end
+local isAdmin = Admin.isAdmin
 
 -- Zera o jogador: perfil de jogador novo, terreno limpo e boneco de volta ao começo.
 local function resetPlayer(player: Player): boolean
@@ -1035,6 +1115,38 @@ local function adminCommand(name: string, alias: string, action: (admin: Player,
 	end)
 	command.Parent = game:GetService("TextChatService")
 end
+-- Sala de testes da equipe (DevArea): /lab leva o dev para lá, /back devolve ao terreno.
+-- Devolve o aviso para o dev.
+local function devAreaCommand(admin: Player, go: boolean): string
+	local root = State.root(admin)
+	if not root or Run.isBusy(admin) then
+		return "Finish what you are doing first."
+	end
+	local target = if go then DevArea.arriveCFrame() else State.homeCFrame(admin)
+	if not target then
+		return "No plot to go back to."
+	end
+	-- o mapa é carregado por proximidade: pede o destino antes, senão o boneco chega sem chão
+	pcall(function()
+		admin:RequestStreamAroundAsync(target.Position, 5)
+	end)
+	root.AssemblyLinearVelocity = Vector3.zero
+	;(admin.Character :: Model):PivotTo(target)
+	return if go then "DEV AREA: test anything here. /back to return." else "Back to your plot."
+end
+for name, alias in { Lab = "/lab", Back = "/back" } do
+	local command = Instance.new("TextChatCommand")
+	command.Name = name
+	command.PrimaryAlias = alias
+	command.Triggered:Connect(function(source)
+		local admin = Players:GetPlayerByUserId(source.UserId)
+		if not admin or not isAdmin(admin) then
+			return
+		end
+		remotes.Fx:FireClient(admin, "toast", devAreaCommand(admin, name == "Lab"))
+	end)
+	command.Parent = game:GetService("TextChatService")
+end
 adminCommand("GiveAll", "/giveall", function(_, target)
 	local count = giveAll(target)
 	return `GIVEALL ({target.Name}): {count} characters, all auras, max skills, money and power!`
@@ -1080,6 +1192,63 @@ adminCommand("Reset", "/reset", function(_, target)
 	return if resetPlayer(target) then `RESET ({target.Name}): everything back to zero.` else `RESET ({target.Name}): no data loaded.`
 end)
 
+-- Chefe para teste: /spawn leva o admin para a sala do chefe do mundo dele e acorda o golem (sem
+-- direito ao sorteio na vitória). Com a luta rolando, /spawn <golpe> força aquele golpe:
+-- stomp, sweep, slam, charge ou pulse (os golpes novos aparecem se o experimento estiver ligado).
+local function spawnCommand(admin: Player, text: string): string
+	local wanted = string.lower(string.match(text, "^%S+%s+(%a+)") or "")
+	if wanted ~= "" then
+		local attack: string? = nil
+		for name in Config.Boss.attacks do
+			if string.lower(name) == wanted then
+				attack = name
+			end
+		end
+		if not attack then
+			return "Usage: /spawn   or   /spawn stomp|sweep|slam|charge|pulse"
+		end
+		local key = admin:GetAttribute("RoomKey")
+		local state = if type(key) == "string" then Boss.debug(key) else nil
+		if not state or state.state == "sleep" or state.state == "wake" or state.state == "dead" then
+			return "Use /spawn first and wait for the boss to wake up."
+		end
+		Boss.test(key :: string, "attack", attack)
+		return `BOSS: {string.upper(attack)}!`
+	end
+	if Run.isBusy(admin) then
+		return "Finish the run first."
+	end
+	if admin:GetAttribute("RoomKey") == nil then
+		BossRoom.enter(admin)
+	end
+	local key = admin:GetAttribute("RoomKey")
+	if type(key) ~= "string" then
+		return "Could not reach the boss room."
+	end
+	local state = Boss.debug(key)
+	if state and state.state ~= "sleep" then
+		return "The boss is already up. /spawn slam (or charge, stomp, sweep, pulse) forces an attack."
+	end
+	-- um instante para o boneco chegar e a câmera assentar antes da cena do despertar
+	task.delay(0.8, function()
+		Boss.challenge(admin, true)
+	end)
+	return "BOSS: here it comes! /spawn <attack> forces an attack."
+end
+for name, alias in { Spawn = "/spawn", Spaw = "/spaw" } do
+	local command = Instance.new("TextChatCommand")
+	command.Name = name
+	command.PrimaryAlias = alias
+	command.Triggered:Connect(function(source, text)
+		local admin = Players:GetPlayerByUserId(source.UserId)
+		if not admin or not isAdmin(admin) then
+			return
+		end
+		remotes.Fx:FireClient(admin, "toast", spawnCommand(admin, text))
+	end)
+	command.Parent = game:GetService("TextChatService")
+end
+
 -- Gancho de teste: só existe no Studio. Os testes em src/server/tests chamam por aqui.
 if RunService:IsStudio() then
 	-- TestUi: S->C, os testes perguntam ao cliente o estado das janelas e das poses
@@ -1092,6 +1261,32 @@ if RunService:IsStudio() then
 	hook.OnInvoke = function(command: string, player: Player, value: any): any
 		if command == "state" then
 			return PlayerData.get(player)
+		elseif command == "sword" then
+			-- value = { text = "/sword", admin = false } simula quem não é dev
+			if value.text == "toggle" then
+				return Sword.toggle(player) -- o mesmo que o clique no slot da hotbar
+			end
+			return Sword.command(player, value.text, value.admin ~= false and isAdmin(player))
+		elseif command == "swordcombat" then
+			-- value = { action = "swing" | "debug" | "clear", index }
+			if value.action == "swing" then
+				return SwordCombat.swing(player, value.index)
+			elseif value.action == "clear" then
+				return SwordCombat.clearLog()
+			end
+			return SwordCombat.debug()
+		elseif command == "shidori" then
+			-- value = { action = "cast" | "debug" | "clear" | "resetCooldown" | "stamina", amount }
+			if value.action == "cast" then
+				return Shidori.cast(player)
+			elseif value.action == "clear" then
+				return Shidori.clearLog()
+			elseif value.action == "resetCooldown" then
+				return Shidori.resetCooldown(player)
+			elseif value.action == "stamina" then
+				return Stamina.set(player, value.amount)
+			end
+			return Shidori.debug(player)
 		elseif command == "ui" then
 			return testUi:InvokeClient(player, value.command, value.arg)
 		elseif command == "plot" then
@@ -1119,15 +1314,23 @@ if RunService:IsStudio() then
 			return true
 		elseif command == "roll" then
 			return Run.rollCharacter(value)
+		elseif command == "bossReward" then
+			-- o sorteio da vitória direto (sem luta): { id, novo, pena }
+			return { Run.reward(player) }
+		elseif command == "luck" then
+			local profile = PlayerData.get(player)
+			return if profile then Progress.luckBoost(player, profile) else nil
 		elseif command == "travel" then
 			return travel(player, value)
+		elseif command == "spawnCommand" then
+			return spawnCommand(player, value)
 		elseif command == "leaveRoom" then
 			return BossRoom.leave(player)
 		elseif command == "bossWin" then
 			return BossRoom.victory(player)
 		elseif command == "boss" then
 			-- value = { action, arg }: estado e controle do golem da sala em que o jogador está
-			local room = player:GetAttribute("Room") or value.world or 1
+			local room = player:GetAttribute("RoomKey") or value.world or 1
 			if value.action == "state" then
 				return Boss.debug(room)
 			elseif value.action == "challenge" then
@@ -1145,6 +1348,8 @@ if RunService:IsStudio() then
 			return Pedestals.interact(player, value)
 		elseif command == "mount" then
 			return useMount(player, value)
+		elseif command == "ride" then
+			return rideMount(player)
 		elseif command == "collect" then
 			return Pedestals.collect(player)
 		elseif command == "fighterUp" then
@@ -1191,6 +1396,8 @@ if RunService:IsStudio() then
 			return (giveCommand(player, value))
 		elseif command == "isAdmin" then
 			return isAdmin(player)
+		elseif command == "devArea" then
+			return devAreaCommand(player, value == true)
 		elseif command == "giveAll" then
 			return giveAll(player)
 		elseif command == "auraEquip" then

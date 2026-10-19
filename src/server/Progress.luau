@@ -45,9 +45,10 @@ function Progress.moneyBoost(_player: Player, profile: PlayerData.Profile): numb
 	return (1 + profile.rebirths * Config.Rebirth.moneyPerRebirth) * potion(profile, "money")
 end
 
--- Sorte do sorteio de personagem no fim da corrida.
+-- Sorte do sorteio de personagem no fim da corrida: poção x skill LUCK, com teto.
 function Progress.luckBoost(_player: Player, profile: PlayerData.Profile): number
-	return potion(profile, "luck")
+	local luck = potion(profile, "luck") * Config.luckFromStat(profile.stats.luck or 0)
+	return math.min(luck, Config.Roll.maxLuck)
 end
 
 ---------------------------------------------------------------------------------------------------

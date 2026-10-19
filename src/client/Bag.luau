@@ -207,7 +207,8 @@ local function inRange(): boolean
 	return flat.Magnitude <= Config.Bag.hitRange
 end
 
-local function floatNumber(gain: number, crit: boolean)
+-- Número do Poder ganho, subindo do saco (ou de `at`, como no soco no golem).
+local function floatNumber(gain: number, crit: boolean, at: Vector3?)
 	local anchor = Instance.new("Part")
 	anchor.Anchored = true
 	anchor.CanCollide = false
@@ -215,7 +216,7 @@ local function floatNumber(gain: number, crit: boolean)
 	anchor.CanTouch = false
 	anchor.Transparency = 1
 	anchor.Size = Vector3.one
-	anchor.Position = bagCenter + Vector3.new(math.random(-15, 15) / 10, 2.5, math.random(-15, 15) / 10)
+	anchor.Position = (at or bagCenter) + Vector3.new(math.random(-15, 15) / 10, 2.5, math.random(-15, 15) / 10)
 
 	local board = Instance.new("BillboardGui")
 	board.Size = if crit then UDim2.fromScale(11, 4.4) else UDim2.fromScale(5, 2.2)
@@ -252,6 +253,7 @@ local function floatNumber(gain: number, crit: boolean)
 	end)
 	last:Play()
 end
+Bag.floatNumber = floatNumber
 
 -- Impacto confirmado pelo servidor: estrela na frente, onda de ar e energia saindo por trás.
 local function onHit(gain: number, crit: boolean?)
@@ -328,6 +330,9 @@ local function isPunchInput(input: InputObject): boolean
 		or input.KeyCode == Enum.KeyCode.ButtonR2
 end
 
+-- Ligado pela espada (SwordCombat): com ela na mão o clique é golpe, não soco.
+Bag.blocked = nil :: (() -> boolean)?
+
 function Bag.start()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local bagHit = remotes:WaitForChild("BagHit") :: RemoteEvent
@@ -389,7 +394,10 @@ function Bag.start()
 			local near = inRange()
 			local other = if not near and Bag.target then Bag.target() else nil
 			-- o soco automático é só para o saco; no golem, só segurando o botão
-			if (holding or pending or (Auto.isOn("punch") and near)) and (near or other) and not Super.isBusy() and not Windows.current() then
+			if Bag.blocked and Bag.blocked() then
+				pending = false
+				task.wait()
+			elseif (holding or pending or (Auto.isOn("punch") and near)) and (near or other) and not Super.isBusy() and not Windows.current() then
 				pending = false
 				if other then
 					startPunch(other)

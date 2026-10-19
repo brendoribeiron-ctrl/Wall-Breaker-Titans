@@ -20,6 +20,14 @@ Config.Admins = {
 -- Em jogo de grupo, quem tem este cargo (rank) ou maior também é admin. 255 = só o dono.
 Config.AdminGroupRank = 255
 
+-- Sala de testes da equipe (src/server/DevArea.luau): chão xadrez longe do mapa, só para dev.
+-- /lab leva, /back devolve ao terreno. Fica a 5000 studs do gramado, para o lado oposto ao
+-- vulcão (+9000).
+Config.DevArea = {
+	center = Vector3.new(-5000, 0, 0),
+	size = 800,
+}
+
 Config.Rarities = {
 	{ id = "Common", color = Color3.fromRGB(180, 180, 180) },
 	{ id = "Uncommon", color = Color3.fromRGB(63, 196, 30) },
@@ -260,8 +268,8 @@ Config.VolcanoWalls = {
 --   hallway  = nome da pasta da pista no Workspace (o cliente procura as paredes nela)
 --   plots    = nome da pasta dos terrenos desse mundo no Workspace
 Config.Worlds = {
-	{ id = 1, name = "MEADOW", rebirths = 0, offset = Vector3.zero, walls = Config.Walls, hallway = "Hallway", plots = "Plots", suffix = "", incomeMultiplier = 1, color = Color3.fromRGB(63, 196, 30) },
-	{ id = 2, name = "VOLCANO", rebirths = 1, offset = Vector3.new(9000, 0, 0), walls = Config.VolcanoWalls, hallway = "VolcanoHallway", plots = "VolcanoPlots", suffix = "_magma", incomeMultiplier = 10, prefix = "Magma ", color = Color3.fromRGB(255, 110, 30) },
+	{ id = 1, name = "MEADOW", rebirths = 0, offset = Vector3.zero, walls = Config.Walls, hallway = "Hallway", plots = "Plots", index = "BLACK CLOVER", suffix = "", incomeMultiplier = 1, color = Color3.fromRGB(63, 196, 30) },
+	{ id = 2, name = "VOLCANO", rebirths = 1, offset = Vector3.new(9000, 0, 0), walls = Config.VolcanoWalls, hallway = "VolcanoHallway", plots = "VolcanoPlots", index = "VOLCANO", suffix = "_magma", incomeMultiplier = 10, prefix = "Magma ", color = Color3.fromRGB(255, 110, 30) },
 }
 
 -- Mundo em que o jogador está agora (atributo "World", posto pelo servidor).
@@ -314,11 +322,12 @@ Config.Wizard = {
 }
 
 -- Sala do chefe (src/server/BossRoom.luau; modelo em tools/blender/boss_room.py): a rotunda
--- para onde vai quem limpa o corredor inteiro. Cada mundo tem a sua, em center + offset do
--- mundo: longe e no alto, fora do alcance de quem está no mapa. As medidas abaixo são as do
+-- para onde vai quem limpa o corredor inteiro. Cada jogador tem a sua cópia (com o seu golem),
+-- em center + offset do mundo + n * spacing: longe e no alto, fora do alcance de quem está no mapa. As medidas abaixo são as do
 -- modelo; no jogo tudo é multiplicado por scale.
 Config.BossRoom = {
-	center = Vector3.new(0, 1200, -700), -- centro do piso
+	center = Vector3.new(0, 1200, -700), -- centro do piso (da primeira sala do mundo)
+	spacing = 400, -- cada jogador luta na sua cópia da sala: a cópia n fica n * spacing em +X
 	scale = 2, -- tamanho da sala no jogo, em vezes o do modelo do Blender
 	radius = 64, -- até a face de dentro da parede
 	wallHeight = 60,
@@ -339,7 +348,7 @@ Config.BossRoom = {
 Config.Boss = {
 	names = { "THE SLUMBERING COLOSSUS", "THE MAGMA COLOSSUS" },
 	scale = 1.5, -- o modelo tem ~32 studs de altura; no jogo, ~48 (o tamanho da sala pede)
-	hp = { 80, 110 }, -- socos por jogador na luta, por mundo (crítico conta 2)
+	-- A vida e o dano da luta não ficam aqui: vêm de Config.Bosses e Config.Combat (CombatBalance.luau).
 	hitRange = 21, -- distância horizontal máxima do jogador ao centro do golem para o soco contar
 	hitCooldown = 0.22,
 	radius = 7, -- corpo do golem (colisão)
@@ -362,17 +371,128 @@ Config.Boss = {
 		Pulse = { damage = 30, ahead = 8, side = -7, speed = 52, reach = 72, height = 5, weight = 2 },
 		Charge = { damage = 34, radius = 12, ahead = 8, lunge = 9 },
 	},
+	-- EXPERIMENTOS (src/shared/GolemExperiment.luau): golpes com animação nova
+	-- (tools/blender/golem_v2.py) e efeitos novos (src/client/BossFx<Clip>.luau). false = volta ao
+	-- golpe original. Dano, raio e alcance continuam os de attacks; só muda o tempo até o impacto.
+	-- Poder ganho por soco no golem = socos cheios (1; o crítico vale 2) x Poder de um soco no saco
+	-- (nível atual) x isto, com os mesmos multiplicadores do saco (aura, rebirth, poção, amigos).
+	-- Não depende do dano em vida, que cresce com o Poder (Config.Combat). 0 desliga.
+	powerPerDamage = 1,
+	-- Sorteio da vitória: a sorte do jogador (poção x skill LUCK) vezes isto, do Raro para cima.
+	victoryLuck = 1.5,
+	-- Pena (pity): a cada `pity` vitórias num mundo, o sorteio vira o melhor personagem dele
+	-- (Config.bestCharacter). O contador é por mundo e zera quando esse personagem sai, garantido ou não.
+	pity = 30,
+	slamV2 = true, -- Esmagamento de Punhos: impacto em 1,10 s (era 1,03 s)
+	chargeV2 = true, -- gancho da corrida: impacto em 0,60 s (era 0,57 s)
+}
+
+-- Balanceamento do combate contra chefes (fórmulas em src/shared/CombatBalance.luau).
+--   dano do soco = baseDamage x mult(Poder do jogador / Poder mínimo do chefe)   (crítico x critMultiplier)
+--   vida do chefe = baseDamage x socos/s de referência x (1 + chance de crítico de referência) x ttk
+-- Ou seja: com o Poder mínimo e o crítico base, a luta dura `ttk` segundos; mais Poder, mais dano.
+-- Não há limite de tempo na luta: o TTK é só o tempo esperado, o chefe não "estoura" o jogador.
+Config.Combat = {
+	baseDamage = 10, -- vida tirada por soco com o Poder mínimo do chefe (unidade de vida)
+	critMultiplier = 2, -- o crítico no chefe vale o dobro do soco
+	hitsPerSecond = 4, -- socos/s de referência: segurando o botão (1 / Config.Bag.holdInterval)
+	critChance = 0.04, -- chance de crítico de referência (a base; skills deixam a luta mais curta)
+	-- Curva do dano: { Poder / Poder mínimo, multiplicador do dano }. Com ttk 60 s: 50K = 60 s,
+	-- 75K = 40 s, 100K = 20 s (o TTK cai com 1 / multiplicador). Entre os pontos é linear.
+	curve = { { 1, 1 }, { 1.5, 1.5 }, { 2, 3 } },
+	minMult = 0.25, -- abaixo do Poder mínimo o dano cai proporcional, mas nunca abaixo disto
+	maxMult = 6, -- teto do multiplicador (acima da curva ele sobe com a inclinação do último trecho)
+	-- false: qualquer um desafia o chefe (como antes); true: exige o Poder mínimo do chefe.
+	enforceEntry = false,
+}
+
+-- Combo M1 da espada do Asta (só dev). Os golpes e seus tempos estão em src/shared/SwordMoves.luau;
+-- aqui fica o que se balanceia. damage = múltiplos do dano de um soco no chefe (mesma fórmula de
+-- CombatBalance.punchDamage, mesmo crítico): o combo inteiro (~2,7 s) tira ~9 socos.
+Config.Sword = {
+	size = 1.4, -- escala da espada na mão (1 = modelo do Blender, 4,9 studs; vezes a altura do avatar)
+	floorMargin = 0.3, -- studs: a ponta nunca desce mais que isto do chão (a lâmina é levantada)
+	damage = { 2.4, 2.6, 4 }, -- por golpe: corte diagonal, varredura, golpe final
+	bodyMargin = 2.5, -- studs a mais no raio do corpo do chefe para a lâmina contar
+	finisherRest = 0.3, -- s parado depois do golpe final antes de recomeçar o combo
+	moveScale = 0.35, -- fração da velocidade de caminhada durante o golpe (arma pesada)
+	turnSpeed = 10, -- quão rápido o corpo vira para o alvo durante o preparo (1/s)
+	hitstop = 0.06, -- s que o golpe "trava" quando acerta (só visual, no cliente)
+	tolerance = 0.12, -- folga de tempo (s) que o servidor dá para atraso de rede ao encadear
+}
+
+-- Estamina (servidor manda; o cliente vê o atributo "Stamina"). Hoje só o Shidori gasta.
+-- Regeneração escolhida em 18/10 (o jogo não tinha estamina): de vazio a cheio em 10 s, começando
+-- 1 s depois do último gasto. Com o Shidori (50 por uso, recarga de 7 s) dá para usar 2 seguidos
+-- e depois 1 a cada 7 s, sem a estamina limitar mais que a recarga.
+Config.Stamina = {
+	max = 100,
+	regenPerSecond = 10,
+	regenDelay = 1, -- s sem regenerar depois de gastar
+}
+
+-- Shidori (habilidade elétrica na mão esquerda; servidor: src/server/Shidori.luau; cliente:
+-- src/client/Shidori.luau + ShidoriFx.luau; poses: src/shared/ShidoriMoves.luau). Desbloqueio:
+-- nó "shidori" da árvore de skills (Config.Stats.shidori).
+Config.Shidori = {
+	key = Enum.KeyCode.Z,
+	gamepad = Enum.KeyCode.ButtonY,
+	cost = 50, -- estamina por ativação
+	cooldown = 7, -- s, contados do início da ativação
+	damage = 1.6, -- múltiplos do dano de um soco M1 (o mesmo deal() do Boss; crítico depois, uma vez)
+	-- tempos das fases (s desde o início): preparo, acúmulo, explosão de luz, investida e recuperação.
+	-- As poses e os efeitos seguem estes números (ShidoriMoves usa os mesmos).
+	prep = 0.22, -- fim do preparo (o braço esquerdo desce e o corpo abaixa)
+	charge = 0.78, -- fim do acúmulo (a energia cresce na mão)
+	burst = 0.9, -- explosão de luz: a energia chega à forma principal
+	strike = 1.08, -- palma à frente (pico da investida)
+	hit = { 0.98, 1.24 }, -- janela de dano (tempo da pose)
+	-- folga no fim da janela, no servidor: a posição do boneco chega do cliente atrasada (rede +
+	-- replicação); no Studio a investida chegou ~0,3 s depois do tempo da pose (18/10)
+	tolerance = 0.35,
+	recover = 1.62, -- fim da recuperação (volta ao normal)
+	lunge = 34, -- studs/s da investida (cliente; o servidor confere o alcance)
+	lungeTime = { 0.92, 1.16 },
+	reach = 5, -- studs da mão até a superfície do chefe para contar
+	moveScale = 0.15, -- fração da caminhada durante o acúmulo
+}
+
+-- Os chefes, em ordem de dificuldade. minPower: Poder mínimo recomendado (1,5x o do anterior);
+-- ttk: segundos para vencer com esse Poder; hpScale/curve: ajustes de um chefe específico (opcionais).
+-- O chefe de cada mundo é o de mesmo índice (Config.Worlds[n].id). Adicionar um chefe = uma linha.
+-- Os nomes de 3 a 10 são provisórios (modelos novos virão).
+Config.Bosses = {
+	{ id = 1, name = "THE SLUMBERING COLOSSUS", minPower = 50_000, ttk = 60 },
+	{ id = 2, name = "THE MAGMA COLOSSUS", minPower = 75_000, ttk = 60 },
+	{ id = 3, name = "BOSS 3", minPower = 112_500, ttk = 60 },
+	{ id = 4, name = "BOSS 4", minPower = 168_750, ttk = 60 },
+	{ id = 5, name = "BOSS 5", minPower = 253_125, ttk = 60 },
+	{ id = 6, name = "BOSS 6", minPower = 379_688, ttk = 60 },
+	{ id = 7, name = "BOSS 7", minPower = 569_531, ttk = 60 },
+	{ id = 8, name = "BOSS 8", minPower = 854_297, ttk = 60 },
+	{ id = 9, name = "BOSS 9", minPower = 1_281_445, ttk = 60 },
+	{ id = 10, name = "BOSS 10", minPower = 1_922_168, ttk = 60 },
 }
 
 -- Modelos de Shared.Assets que não são cenário espalhado (cada um tem o próprio módulo).
-Config.StructureAssets = { golem = true, boss_room = true, sanctum = true, potion_shop = true, wizard = true, volcano_terrace = true, volcano_base = true, volcano_track = true, volcano_mount = true, volcano_spire = true }
+Config.StructureAssets = { golem = true, boss_fx = true, boss_room = true, sanctum = true, potion_shop = true, wizard = true, volcano_terrace = true, volcano_base = true, volcano_track = true, volcano_mount = true, volcano_spire = true }
 
--- Sorteio: pesos em relação ao tier da última parede quebrada.
+-- Sorteio do fim da corrida (Run.rollCharacter). Chegar na parede de uma raridade NÃO garante
+-- ela: só deixa as raras um pouco mais prováveis. Peso de cada raridade (Common, Uncommon, Rare,
+-- Epic, Legendary, Mythic) pelo tier da última parede quebrada; Mítico fica raro até no fim.
+-- A sorte (a 2ª parede do tier vale um pouco mais; poção de sorte) multiplica do Raro para cima.
 Config.Roll = {
-	sameWeight = 60,
-	lowerWeight = 30,
-	higherWeight = 10, -- multiplicado pela sorte da parede, até higherCap
-	higherCap = 50,
+	odds = {
+		{ 75, 22, 3, 0, 0, 0 },
+		{ 50, 38, 11, 1, 0, 0 },
+		{ 32, 40, 23, 4.5, 0.5, 0 },
+		{ 20, 36, 31, 11, 1.8, 0.2 },
+		{ 12, 30, 35, 17, 5.5, 0.5 },
+		{ 8, 24, 36, 22, 8.8, 1.2 },
+	},
+	luckFrom = 3, -- primeira raridade que a sorte multiplica (Rare)
+	maxLuck = 3, -- teto da sorte do jogador (poção x skill LUCK; hoje no máximo 2 x 1,5 = 3)
+	wallLuckPower = 0.5, -- quanto a sorte da parede pesa dentro do tier (raiz da razão)
 }
 
 Config.Inventory = {
@@ -386,26 +506,28 @@ local function rgb(r: number, g: number, b: number): Color3
 	return Color3.fromRGB(r, g, b)
 end
 
--- hat: none | band | cap | hood | spikes | horns | crown | halo
+-- Mundo 1: elenco de Black Clover. model = chave em Shared.AnimeCast (avatar do catálogo, montado
+-- em ReplicatedStorage.CharacterMeshes); body/pants/glove/hat montam o boneco de peças enquanto
+-- ele não carrega. hat: none | band | cap | hood | spikes | horns | crown | halo
 Config.Characters = {
-	{ id = "rookie_jabber", name = "Rookie Jabber", rarity = 1, income = 1, body = rgb(235, 235, 235), pants = rgb(60, 90, 200), glove = rgb(220, 40, 40), hat = "none" },
-	{ id = "rope_skipper", name = "Rope Skipper", rarity = 1, income = 1, body = rgb(255, 214, 70), pants = rgb(60, 60, 70), glove = rgb(240, 240, 240), hat = "band" },
-	{ id = "bucket_boxer", name = "Bucket Boxer", rarity = 1, income = 2, body = rgb(130, 200, 255), pants = rgb(40, 60, 110), glove = rgb(255, 150, 40), hat = "cap" },
-	{ id = "brick_bruiser", name = "Brick Bruiser", rarity = 2, income = 2, body = rgb(200, 80, 50), pants = rgb(70, 40, 30), glove = rgb(110, 60, 40), hat = "none" },
-	{ id = "turbo_sparrer", name = "Turbo Sparrer", rarity = 2, income = 3, body = rgb(70, 220, 110), pants = rgb(20, 20, 30), glove = rgb(255, 235, 60), hat = "band" },
-	{ id = "dojo_cadet", name = "Dojo Cadet", rarity = 2, income = 4, body = rgb(250, 250, 250), pants = rgb(250, 250, 250), glove = rgb(40, 150, 70), hat = "band" },
-	{ id = "frost_hook", name = "Frost Hook", rarity = 3, income = 6, body = rgb(120, 200, 255), pants = rgb(235, 245, 255), glove = rgb(180, 240, 255), hat = "spikes" },
-	{ id = "volt_kicker", name = "Volt Kicker", rarity = 3, income = 8, body = rgb(40, 60, 160), pants = rgb(20, 20, 40), glove = rgb(255, 240, 60), hat = "spikes" },
-	{ id = "stone_guard", name = "Stone Guard", rarity = 3, income = 10, body = rgb(130, 130, 145), pants = rgb(80, 80, 95), glove = rgb(90, 160, 255), hat = "cap" },
-	{ id = "shadow_sensei", name = "Shadow Sensei", rarity = 4, income = 13, body = rgb(40, 30, 60), pants = rgb(25, 20, 40), glove = rgb(190, 80, 255), hat = "hood" },
-	{ id = "blaze_champion", name = "Blaze Champion", rarity = 4, income = 16, body = rgb(255, 110, 30), pants = rgb(120, 20, 20), glove = rgb(255, 220, 60), hat = "spikes" },
-	{ id = "storm_monk", name = "Storm Monk", rarity = 4, income = 20, body = rgb(150, 90, 230), pants = rgb(245, 240, 255), glove = rgb(120, 240, 255), hat = "halo" },
-	{ id = "golden_gladiator", name = "Golden Gladiator", rarity = 5, income = 28, body = rgb(255, 200, 40), pants = rgb(140, 30, 30), glove = rgb(255, 235, 140), hat = "crown" },
-	{ id = "titan_wrestler", name = "Titan Wrestler", rarity = 5, income = 36, body = rgb(30, 160, 150), pants = rgb(255, 170, 40), glove = rgb(255, 120, 30), hat = "horns" },
-	{ id = "comet_striker", name = "Comet Striker", rarity = 5, income = 46, body = rgb(255, 150, 60), pants = rgb(30, 30, 70), glove = rgb(120, 220, 255), hat = "halo" },
-	{ id = "void_emperor", name = "Void Emperor", rarity = 6, income = 60, body = rgb(30, 10, 50), pants = rgb(15, 5, 25), glove = rgb(255, 40, 90), hat = "crown" },
-	{ id = "solar_colossus", name = "Solar Colossus", rarity = 6, income = 80, body = rgb(255, 235, 120), pants = rgb(255, 120, 20), glove = rgb(255, 60, 30), hat = "horns" },
-	{ id = "abyss_titan", name = "Abyss Titan", rarity = 6, income = 110, body = rgb(20, 40, 90), pants = rgb(10, 15, 40), glove = rgb(60, 255, 220), hat = "horns" },
+	{ id = "rookie_jabber", name = "Magna Swing", model = "magna", rarity = 1, income = 1, body = rgb(235, 235, 235), pants = rgb(60, 90, 200), glove = rgb(220, 40, 40), hat = "none" },
+	{ id = "rope_skipper", name = "Luck Voltia", model = "luck", rarity = 1, income = 1, body = rgb(255, 214, 70), pants = rgb(60, 60, 70), glove = rgb(240, 240, 240), hat = "band" },
+	{ id = "bucket_boxer", name = "Secre Swallowtail", model = "secre", rarity = 1, income = 2, body = rgb(130, 200, 255), pants = rgb(40, 60, 110), glove = rgb(255, 150, 40), hat = "cap" },
+	{ id = "brick_bruiser", name = "Vanessa Enoteca", model = "vanessa", rarity = 2, income = 2, body = rgb(200, 80, 50), pants = rgb(70, 40, 30), glove = rgb(110, 60, 40), hat = "none" },
+	{ id = "turbo_sparrer", name = "Zora Ideale", model = "zora", rarity = 2, income = 3, body = rgb(70, 220, 110), pants = rgb(20, 20, 30), glove = rgb(255, 235, 60), hat = "band" },
+	{ id = "dojo_cadet", name = "Mimosa Vermillion", model = "mimosa", rarity = 2, income = 4, body = rgb(250, 250, 250), pants = rgb(250, 250, 250), glove = rgb(40, 150, 70), hat = "band" },
+	{ id = "frost_hook", name = "Noelle Silva", model = "noelle", rarity = 3, income = 6, body = rgb(120, 200, 255), pants = rgb(235, 245, 255), glove = rgb(180, 240, 255), hat = "spikes" },
+	{ id = "volt_kicker", name = "Yuno", model = "yuno", rarity = 3, income = 8, body = rgb(40, 60, 160), pants = rgb(20, 20, 40), glove = rgb(255, 240, 60), hat = "spikes" },
+	{ id = "stone_guard", name = "Nacht Faust", model = "nacht", rarity = 3, income = 10, body = rgb(130, 130, 145), pants = rgb(80, 80, 95), glove = rgb(90, 160, 255), hat = "cap" },
+	{ id = "shadow_sensei", name = "Asta", model = "asta", rarity = 4, income = 13, body = rgb(40, 30, 60), pants = rgb(25, 20, 40), glove = rgb(190, 80, 255), hat = "hood" },
+	{ id = "blaze_champion", name = "Mereoleona Vermillion", model = "mereoleona", rarity = 4, income = 16, body = rgb(255, 110, 30), pants = rgb(120, 20, 20), glove = rgb(255, 220, 60), hat = "spikes" },
+	{ id = "storm_monk", name = "Fuegoleon Vermillion", model = "fuegoleon", rarity = 4, income = 20, body = rgb(150, 90, 230), pants = rgb(245, 240, 255), glove = rgb(120, 240, 255), hat = "halo" },
+	{ id = "golden_gladiator", name = "Yami Sukehiro", model = "yami", rarity = 5, income = 28, body = rgb(255, 200, 40), pants = rgb(140, 30, 30), glove = rgb(255, 235, 140), hat = "crown" },
+	{ id = "titan_wrestler", name = "Zenon Zogratis", model = "zenon", rarity = 5, income = 36, body = rgb(30, 160, 150), pants = rgb(255, 170, 40), glove = rgb(255, 120, 30), hat = "horns" },
+	{ id = "comet_striker", name = "Dante Zogratis", model = "dante", rarity = 5, income = 46, body = rgb(255, 150, 60), pants = rgb(30, 30, 70), glove = rgb(120, 220, 255), hat = "halo" },
+	{ id = "void_emperor", name = "Julius Novachrono", model = "julius", rarity = 6, income = 60, body = rgb(30, 10, 50), pants = rgb(15, 5, 25), glove = rgb(255, 40, 90), hat = "crown" },
+	{ id = "solar_colossus", name = "Lucius Zogratis", model = "lucius", rarity = 6, income = 80, body = rgb(255, 235, 120), pants = rgb(255, 120, 20), glove = rgb(255, 60, 30), hat = "horns" },
+	{ id = "abyss_titan", name = "Demon Asta", model = "demon", rarity = 6, income = 110, body = rgb(20, 40, 90), pants = rgb(10, 15, 40), glove = rgb(60, 255, 220), hat = "horns" },
 }
 
 -- Super soco: cada soco no saco tem uma chance pequena (menor que a do crítico) de abrir um
@@ -496,6 +618,7 @@ Config.Panel = {
 	openTwist = 55, -- graus que o painel nasce virado de lado
 	maxTilt = 7, -- inclinação máxima seguindo o cursor, em graus
 	tiltSpeed = 9, -- quão rápido a inclinação segue o cursor
+	clearance = 0.6, -- ao abrir perto de um objeto (balcão de poções): folga entre ele e o painel/câmera
 	leash = 7, -- o painel fecha se o boneco se afastar mais que isto de onde abriu
 	armIdle = 3, -- segundos com o cursor parado até o braço descer
 	armDrop = 0.5, -- o braço aponta este tanto abaixo do cursor, para a mão não cobrir o clique
@@ -523,9 +646,27 @@ Config.Stats = {
 	speed = { label = "SPEED", unit = "walk speed", max = 10, baseCost = 150, growth = 2.2, perLevel = 3 },
 	critChance = { label = "CRIT CHANCE", unit = "% chance", max = 10, baseCost = 400, growth = 2.2, perLevel = 0.016 },
 	critDamage = { label = "CRIT DAMAGE", unit = "x power", max = 10, baseCost = 600, growth = 2.2, perLevel = 1 },
+	-- sorte do sorteio de personagem: +5% por nível, multiplica a poção (teto em Config.Roll.maxLuck)
+	luck = { label = "LUCK", unit = "x luck", max = 10, baseCost = 500, growth = 2.2, perLevel = 0.05 },
+	-- corta o dano recebido do golem: 4% por nível (teto em Config.Defense.maxReduction)
+	defense = { label = "DEFENSE", unit = "% less damage", max = 10, baseCost = 450, growth = 2.2, perLevel = 0.04 },
+	-- vida máxima: +perLevel por nível em cima de Config.Health.base
+	health = { label = "HEALTH", unit = "max HP", max = 10, baseCost = 400, growth = 2.2, perLevel = 20 },
+	-- habilidade: um nó só (desbloqueia o Shidori, tecla Z; números em Config.Shidori)
+	shidori = { label = "SHIDORI", unit = "", max = 1, baseCost = 1500, growth = 1, perLevel = 1 },
+}
+-- Vida do jogador: base sem skill (o servidor põe no Humanoid.MaxHealth; o HUD mostra o número).
+Config.Health = {
+	base = 100,
+}
+-- Defesa: dano recebido = dano do golpe (já com a raiva) x (1 - redução), com
+-- redução = nível x perLevel, nunca acima de maxReduction; o golpe tira pelo menos minDamage.
+Config.Defense = {
+	maxReduction = 0.5,
+	minDamage = 1,
 }
 Config.StatWorldCap = 0.3 -- parte do máximo de cada skill que dá para comprar antes do mundo 2
-Config.StatOrder = { "speed", "critChance", "critDamage" }
+Config.StatOrder = { "speed", "critChance", "critDamage", "luck", "defense", "health", "shidori" }
 
 -- Até que nível a skill pode ir com estes rebirths.
 function Config.statCap(name: string, rebirths: number): number
@@ -534,6 +675,26 @@ function Config.statCap(name: string, rebirths: number): number
 		return stat.max
 	end
 	return math.ceil(stat.max * Config.StatWorldCap)
+end
+
+-- Multiplicador de sorte da skill LUCK no nível `level`.
+function Config.luckFromStat(level: number): number
+	return 1 + level * Config.Stats.luck.perLevel
+end
+
+-- Parte do dano que a skill DEFENSE corta no nível `level`.
+function Config.defenseReduction(level: number): number
+	return math.clamp(level * Config.Stats.defense.perLevel, 0, Config.Defense.maxReduction)
+end
+
+-- Vida máxima com a skill HEALTH no nível `level`.
+function Config.maxHealth(level: number): number
+	return Config.Health.base + level * Config.Stats.health.perLevel
+end
+
+-- Dano final de um golpe de `amount` em quem tem DEFENSE no nível `level`.
+function Config.defendedDamage(amount: number, level: number): number
+	return math.max(math.floor(amount * (1 - Config.defenseReduction(level)) + 0.5), Config.Defense.minDamage)
 end
 
 function Config.statCost(name: string, level: number): number
@@ -722,7 +883,7 @@ for _, info in Config.Characters do
 	Config.CharacterById[info.id] = info
 end
 -- Versão de cada mundo seguinte (sorteada nas pistas dele): mesmo personagem, feito de rocha e
--- lava, com a renda multiplicada. Não entra no INDEX.
+-- lava, com a renda multiplicada. Fica na aba do mundo dele no INDEX.
 local LAVA, ASH = rgb(255, 110, 20), rgb(48, 30, 34)
 local everyone = table.clone(Config.Characters)
 for _, world in Config.Worlds do
@@ -740,6 +901,26 @@ for _, world in Config.Worlds do
 			table.insert(everyone, variant)
 		end
 	end
+end
+-- INDEX: uma aba por mundo (título em world.index) com os personagens sorteados nas pistas dele.
+-- Os de Black Clover ficam no mundo 1; as versões de magma, na aba do vulcão.
+Config.IndexByWorld = {}
+for _, world in Config.Worlds do
+	Config.IndexByWorld[world.id] = {}
+end
+for _, info in everyone do
+	table.insert(Config.IndexByWorld[info.world or 1], info)
+end
+
+-- Melhor personagem de um mundo (o da pena do chefe): maior raridade, depois maior renda.
+function Config.bestCharacter(world: any): string
+	local best = Config.Characters[1]
+	for _, info in Config.Characters do
+		if info.rarity > best.rarity or (info.rarity == best.rarity and info.income > best.income) then
+			best = info
+		end
+	end
+	return best.id .. world.suffix
 end
 -- Versão Shiny de cada personagem (só por fusão): não entra no sorteio nem no INDEX.
 local GOLD = rgb(255, 205, 60)

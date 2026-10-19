@@ -47,24 +47,28 @@ function Run.isBusy(player: Player): boolean
 	return sessions[player] ~= nil
 end
 
--- Raridade a partir do tier da última parede quebrada; depois um personagem daquela raridade.
--- luckBoost multiplica a sorte da parede (poção de sorte). world = o mundo da pista: decide as
--- paredes e a versão do personagem (sem isso, mundo 1).
+-- Raridade pela tabela do tier da última parede quebrada (Config.Roll); depois um personagem
+-- daquela raridade. luckBoost = poção de sorte. world = o mundo da pista: decide as paredes e a
+-- versão do personagem (sem isso, mundo 1).
 function Run.rollCharacter(broken: number, luckBoost: number?, world: any?): string
 	local place = world or Config.Worlds[1]
-	local tier, luck = 1, 1
+	local roll = Config.Roll
 	local weights: { number } = table.create(#Config.Rarities, 0)
 	if broken == 0 then
 		weights[1] = 1
 	else
 		local wall = place.walls[broken]
-		tier, luck = wall.tier, wall.luck * (luckBoost or 1)
-		local roll = Config.Roll
-		local lower = if tier > 1 then tier - 1 else tier
-		local higher = if tier < #Config.Rarities then tier + 1 else tier
-		weights[tier] += roll.sameWeight
-		weights[lower] += roll.lowerWeight
-		weights[higher] += math.min(roll.higherWeight * luck, roll.higherCap)
+		-- sorte da parede em relação à primeira do mesmo tier: a mais longe vale um pouco mais
+		local base = wall.luck
+		for _, other in place.walls do
+			if other.tier == wall.tier then
+				base = math.min(base, other.luck)
+			end
+		end
+		local boost = (wall.luck / base) ^ roll.wallLuckPower * (luckBoost or 1)
+		for rarity, weight in roll.odds[wall.tier] do
+			weights[rarity] = if rarity >= roll.luckFrom then weight * boost else weight
+		end
 	end
 
 	local total = 0
@@ -72,7 +76,7 @@ function Run.rollCharacter(broken: number, luckBoost: number?, world: any?): str
 		total += weight
 	end
 	local pick = rng:NextNumber() * total
-	local rarity = tier
+	local rarity = 1
 	for index, weight in weights do
 		pick -= weight
 		if pick <= 0 and weight > 0 then
@@ -150,17 +154,27 @@ function Run.finish(player: Player)
 	end
 end
 
--- Sorteio da vitória contra o chefe: o personagem vem da última parede do mundo do jogador.
-function Run.reward(player: Player): (string?, boolean)
+-- Sorteio da vitória contra o chefe: o personagem vem da última parede do mundo do jogador, com
+-- a sorte extra da vitória (Config.Boss.victoryLuck). Pena: a vitória número Config.Boss.pity
+-- desde o último melhor personagem do mundo garante ele. Devolve o id, se é novo e se veio da pena.
+function Run.reward(player: Player): (string?, boolean, boolean)
 	local profile = PlayerData.get(player)
 	if not profile then
-		return nil, false
+		return nil, false, false
 	end
 	local world = State.world(player)
-	local characterId = Run.rollCharacter(#world.walls, Progress.luckBoost(player, profile), world)
+	local key = tostring(world.id)
+	local best = Config.bestCharacter(world)
+	local wins = (profile.bossWins[key] or 0) + 1
+	local pity = wins >= Config.Boss.pity
+	local luck = Progress.luckBoost(player, profile) * Config.Boss.victoryLuck
+	local characterId = if pity then best else Run.rollCharacter(#world.walls, luck, world)
+	PlayerData.update(player, function(p)
+		p.bossWins[key] = if characterId == best then 0 else wins
+	end)
 	local isNew = profile.index[characterId] ~= true
 	grant(player, characterId)
-	return characterId, isNew
+	return characterId, isNew, pity
 end
 
 -- chargeOverride só é usado pelos testes.

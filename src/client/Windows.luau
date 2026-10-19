@@ -49,6 +49,10 @@ local tilt = Vector2.zero
 local lastMouse = Vector2.zero
 local mouseMovedAt = 0
 local muted: { [BasePart]: boolean } = {}
+-- Ao abrir perto de um objeto (balcão de poções), o boneco gira para um lado em que o painel e a
+-- câmera ficam livres dele; nil = usa a frente do boneco.
+local turn: CFrame? = nil
+local turnFrom = CFrame.identity
 
 local function rootPart(): BasePart?
 	local character = player.Character
@@ -209,17 +213,127 @@ function Windows.current(): string?
 	return nil
 end
 
--- Posiciona painel e câmera a partir de onde o boneco está agora.
-local function place(root: BasePart)
-	local frame = CFrame.new(root.Position) * (root.CFrame - root.Position)
+-- Painel e câmera para o boneco em `frame` (posição do boneco, girado para onde ele olha).
+local function layout(frame: CFrame): (CFrame, CFrame)
 	local position = frame:PointToWorldSpace(PANEL.offset + Vector3.new((stretch - 1) * PANEL.size.X / 2, 0, 0))
 	local eye = frame:PointToWorldSpace(PANEL.cameraOffset)
-	base = CFrame.lookAt(position, frame:PointToWorldSpace(PANEL.facing))
-	cameraGoal = CFrame.lookAt(eye, frame:PointToWorldSpace(PANEL.lookAt))
+	return CFrame.lookAt(position, frame:PointToWorldSpace(PANEL.facing)), CFrame.lookAt(eye, frame:PointToWorldSpace(PANEL.lookAt))
+end
+
+-- Posiciona painel e câmera a partir de onde o boneco está agora.
+local function place(root: BasePart)
+	base, cameraGoal = layout(CFrame.new(root.Position) * (turn or root.CFrame.Rotation))
 	origin = root.Position
 end
 
-function Windows.set(name: string, open: boolean)
+type Box = { cf: CFrame, half: { number } }
+
+-- O segmento a-b passa pela caixa? (teste das placas, no espaço da caixa)
+local function crosses(a: Vector3, b: Vector3, box: Box): boolean
+	local p, q = box.cf:PointToObjectSpace(a), box.cf:PointToObjectSpace(b)
+	local from, delta = { p.X, p.Y, p.Z }, { q.X - p.X, q.Y - p.Y, q.Z - p.Z }
+	local t0, t1 = 0, 1
+	for axis = 1, 3 do
+		local s, d, h = from[axis], delta[axis], box.half[axis]
+		if math.abs(d) < 1e-6 then
+			if math.abs(s) > h then
+				return false
+			end
+		else
+			local u, v = (-h - s) / d, (h - s) / d
+			if u > v then
+				u, v = v, u
+			end
+			t0, t1 = math.max(t0, u), math.min(t1, v)
+			if t0 > t1 then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- Quantas linhas de visão ficam tapadas com o boneco olhando para `frame`: da cabeça até a câmera,
+-- da câmera até o centro e os cantos do painel, e as bordas do próprio painel. `boxes` são as peças
+-- do objeto (que não aparecem em raycast); o resto do mundo entra pelo raycast.
+local function blocked(frame: CFrame, boxes: { Box }, params: RaycastParams): number
+	local panel, view = layout(frame)
+	local eye = view.Position
+	local w, h = PANEL.size.X * stretch / 2, PANEL.size.Y / 2
+	local points = { panel.Position }
+	for _, c in { Vector2.new(-1, -1), Vector2.new(1, -1), Vector2.new(1, 1), Vector2.new(-1, 1) } do
+		table.insert(points, panel:PointToWorldSpace(Vector3.new(c.X * w, c.Y * h, 0)))
+	end
+	local function hitsBox(a: Vector3, b: Vector3): boolean
+		for _, box in boxes do
+			if crosses(a, b, box) then
+				return true
+			end
+		end
+		return false
+	end
+	local count = 0
+	local head = frame.Position + Vector3.new(0, PANEL.cameraOffset.Y, 0)
+	if workspace:Raycast(head, eye - head, params) or hitsBox(head, eye) then
+		count += 3
+	end
+	for i, point in points do
+		if workspace:Raycast(eye, point - eye, params) or hitsBox(eye, point) then
+			count += 1
+		end
+		if i > 1 and hitsBox(point, points[if i == 5 then 2 else i + 1]) then
+			count += 1
+		end
+	end
+	if hitsBox(points[2], points[4]) or hitsBox(points[3], points[5]) then
+		count += 1
+	end
+	return count
+end
+
+-- Para onde o boneco gira ao abrir perto de `near`: de frente para o objeto (o jogador já vem
+-- olhando para ele, de qualquer lado), virando o mínimo até painel e câmera ficarem livres.
+local function chooseTurn(root: BasePart, near: Instance): CFrame
+	local boxes: { Box } = {}
+	local parts = if near:IsA("BasePart") then { near } else near:GetDescendants()
+	for _, part in parts do
+		if part:IsA("BasePart") then
+			local half = part.Size / 2 + Vector3.one * PANEL.clearance
+			table.insert(boxes, { cf = part.CFrame, half = { half.X, half.Y, half.Z } })
+		end
+	end
+	local exclude: { Instance } = {}
+	for _, other in Players:GetPlayers() do
+		if other.Character then
+			table.insert(exclude, other.Character)
+		end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+
+	local focus = if near:IsA("Model") then near:GetBoundingBox().Position elseif near:IsA("BasePart") then near.Position else root.Position
+	local toward = Vector3.new(focus.X - root.Position.X, 0, focus.Z - root.Position.Z)
+	local look = if toward.Magnitude > 0.1 then toward.Unit else root.CFrame.LookVector
+	local preferred = math.atan2(-look.X, -look.Z)
+	local best, bestCount = preferred, math.huge
+	for step = 0, 18 do
+		for _, sign in (if step == 0 or step == 18 then { 1 } else { 1, -1 }) do
+			local yaw = preferred + sign * math.rad(step * 10)
+			local count = blocked(CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0), boxes, params)
+			if count < bestCount then
+				best, bestCount = yaw, count
+				if count == 0 then
+					return CFrame.Angles(0, best, 0)
+				end
+			end
+		end
+	end
+	return CFrame.Angles(0, best, 0)
+end
+
+-- near: objeto com que o jogador interage (o painel e a câmera desviam dele).
+function Windows.set(name: string, open: boolean, near: Instance?)
 	local entry = entries[name]
 	if not entry or entry.open == open then
 		return
@@ -258,6 +372,8 @@ function Windows.set(name: string, open: boolean)
 		holding = true
 		startCamera = camera.CFrame
 		startFov = camera.FieldOfView
+		turnFrom = root.CFrame.Rotation
+		turn = if near then chooseTurn(root, near) else nil
 		place(root)
 		tilt = Vector2.zero
 		stage.Parent = workspace
@@ -270,8 +386,8 @@ function Windows.set(name: string, open: boolean)
 	flash.BackgroundTransparency = 0.1
 end
 
-function Windows.toggle(name: string)
-	Windows.set(name, not Windows.isOpen(name))
+function Windows.toggle(name: string, near: Instance?)
+	Windows.set(name, not Windows.isOpen(name), near)
 end
 
 function Windows.closeAll()
@@ -287,6 +403,7 @@ end
 
 local function release()
 	holding = false
+	turn = nil
 	stage.Parent = nil
 	light.Brightness = 0
 	for _, entry in entries do
@@ -337,6 +454,11 @@ local function step(dt: number)
 		return
 	end
 	local eased = 1 - (1 - shown) ^ 3
+
+	-- abrindo perto de um objeto: o boneco gira junto com a câmera para o lado escolhido
+	if turn and root and target == 1 and shown < 1 then
+		root.CFrame = CFrame.new(root.Position) * turnFrom:Lerp(turn, eased)
+	end
 
 	-- câmera: sai de onde estava e vai para trás do ombro (e volta ao fechar)
 	camera.CFrame = startCamera:Lerp(cameraGoal, eased)
@@ -398,6 +520,11 @@ function Windows.debug(): { [string]: any }
 	return {
 		holding = holding,
 		shown = shown,
+		turned = turn ~= nil,
+		cameraType = camera.CameraType.Name,
+		panelFrame = { stage.CFrame:GetComponents() },
+		cameraFrame = { camera.CFrame:GetComponents() },
+		panelSize = { stage.Size.X, stage.Size.Y },
 		parent = if stage.Parent then stage.Parent.Name else "nil",
 		size = tostring(stage.Size),
 		position = tostring(stage.Position),

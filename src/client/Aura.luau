@@ -185,6 +185,15 @@ function Aura.colorOf(player: Player): Color3
 	return colorOf(player)
 end
 
+-- Força e aura equipada de qualquer jogador (a aura da espada, SwordFx.luau).
+function Aura.strengthOf(player: Player): number
+	return strengthOf(player)
+end
+
+function Aura.infoOf(player: Player): any
+	return infoOf(player)
+end
+
 -- Quantos anéis a aura mostra agora: os do desenho dela, liberados aos poucos com a força.
 local function ringsOf(player: Player, k: number): number
 	local info = infoOf(player)

@@ -1,5 +1,6 @@
 # Project place file
 /Teste_foda.rbxlx
+/copia.rbxl
 
 # Roblox Studio lock files
 /*.rbxlx.lock
@@ -18,3 +19,6 @@ sourcemap.json
 
 # Cache do Python dos scripts do Blender
 __pycache__/
+
+# Place do laboratório de efeitos (gerado por rojo build lab.project.json)
+/VfxLab.rbxlx

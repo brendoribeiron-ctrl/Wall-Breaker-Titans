@@ -350,6 +350,31 @@ local function connectPlot(id: number, plot: Model)
 	end
 end
 
+-- Margem horizontal e altura máxima (acima do topo da placa) para valer como "em cima da placa".
+-- Montaria sobe o boneco ~1,9 e o HumanoidRootPart fica ~4 acima da placa; 8 cobre isso com
+-- folga e ainda impede coletar de longe ou pulando bem alto.
+local PAD_MARGIN = 0.5
+local PAD_MAX_HEIGHT = 8
+
+-- O jogador está sobre a placa? Mede pela posição do HumanoidRootPart, não por contato dos pés:
+-- em cima do skate ou do tapete (HipHeight maior, só no cliente) os pés nunca tocam a placa.
+local function standingOn(player: Player, pad: BasePart): boolean
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+		return false
+	end
+	local at = pad.CFrame:PointToObjectSpace(root.Position)
+	return math.abs(at.X) <= pad.Size.X / 2 + PAD_MARGIN
+		and math.abs(at.Z) <= pad.Size.Z / 2 + PAD_MARGIN
+		and at.Y >= -pad.Size.Y / 2
+		and at.Y <= pad.Size.Y / 2 + PAD_MAX_HEIGHT
+end
+
+-- Exposto para os testes.
+Pedestals.standingOn = standingOn
+
 function Pedestals.connect()
 	for _, plots in State.worldPlots do
 		for id, plot in plots do
@@ -375,6 +400,23 @@ function Pedestals.connect()
 		while true do
 			task.wait(1)
 			Pedestals.tick()
+		end
+	end)
+
+	-- Coleta por posição (cobre quem está em montaria); collect() zera o guardado, então
+	-- ficar parado na placa ou combinar com o Touched não paga duas vezes.
+	task.spawn(function()
+		while true do
+			task.wait(0.15)
+			for _, plots in State.worldPlots do
+				for id, plot in plots do
+					local owner = State.owners[id]
+					local pad = plot:FindFirstChild("Collect")
+					if owner and pad and pad:IsA("BasePart") and standingOn(owner, pad) then
+						Pedestals.collect(owner)
+					end
+				end
+			end
 		end
 	end)
 end

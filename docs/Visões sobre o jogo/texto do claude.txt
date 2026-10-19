@@ -1,0 +1,22 @@
+Corrigi o bug da opacidade. Testei num Play meu, aberto com o Studio já em Edição, e já encerrei esse Play.
+
+O que estava errado
+Reproduzi com medida antes de mexer. Pedindo 90 % de opacidade, o texto do dinheiro ia a 0,27 de transparência, e o certo era 0,10. Em 30 % ele chegava a 1,0 (invisível) e não voltava ao pedir 100 %. A hotbar terminava em 0,74 em vez de 0,25.
+
+A causa foi o Roblox guardar a transparência com menos precisão do que o número que o editor pedia: escrevi 0,325 e li 0,32499998. O editor comparava o valor lido com o que tinha escrito, nunca batia, e tratava a própria escrita como mudança de outro código. O valor já esmaecido virava o novo "original" e o esmaecimento era aplicado de novo por cima, em cadeia, até sumir. Só valores como 0,25, exatos nessa precisão, escapavam, por isso parecia aleatório.
+
+O que mudei
+HudEditor.luau: o editor passa a guardar o valor que o Roblox leu de volta e compara os números com uma folga minúscula (1e-4).
+Menus.luau: o gancho de teste ganhou a leitura da transparência real do HUD e um comando que simula outro código mexendo nela.
+hud.luau: o teste antigo só conferia a contabilidade interna, por isso não pegou o bug. Agora ele confere a transparência real em 50 ajustes seguidos. Também confere o mínimo visível, a volta exata a 100 % e um valor novo vindo de outro código.
+Verificação
+Mesma medição de antes: os valores seguem a fórmula passo a passo (0,325 → 0,40 → … → 0,85 em 20 %) e voltam a 0,25 e 0,0 em 100 %.
+Mouse real: arrastei a barra de opacidade até 20 %, tirei um print e arrastei de volta a 100 %. A transparência original voltou, e o botão DONE fechou o editor sem sujar o perfil.
+Teste: 24 checagens passaram, em duas rodadas seguidas.
+Console: sem nenhum erro novo.
+Pendências e observações
+Sem commit: tudo continua sem commit, e o Git só mudou nesses três arquivos.
+Ponte: a ponte continua fora do ar. Não a iniciei, porque você pediu que eu não reiniciasse sem autorização. Rodei tudo pelo MCP do Studio. O script de checagem de sintaxe depende da ponte e não rodou. Em vez dele, o Play compilou os três arquivos sem erro.
+Mínimo de opacidade: em 20 % a hotbar fica visível, mas muito fraca. Se achar pouco, é só subir o mínimo em HudLayout.OPACITY. A decisão é sua.
+Não verificado: o toque em aparelho real, o botão de pular e o layout salvo no celular valendo no PC.
+Documentos: atualizei o contexto de 17/10 e o briefing 02 para registrar a correção, com a causa e as medidas.

@@ -1,0 +1,51 @@
+# Wiki — Sistema de Balanceamento de Combate e Bosses
+
+**Projeto:** Roblox  
+**Categoria:** Game Design / Combate / Progressão  
+**Status:** Proposta técnica em validação  
+**Escopo:** Sistema de socos, Power, DPS, TTK e progressão dos 10 primeiros bosses
+
+---
+
+## 1. Visão geral
+
+O sistema de balanceamento determina como o Power do jogador se relaciona com o dano causado, a frequência dos ataques, a vida dos inimigos e a duração dos combates.
+
+O sistema deverá suportar pelo menos 10 bosses, mantendo uma progressão previsível e evitando a inflação desnecessária dos valores numéricos.
+
+A vida de cada boss deve ser definida com base no DPS efetivo esperado e na duração pretendida para a luta.
+
+Os valores iniciais desta wiki são referências de design. As fórmulas finais dependem da investigação do código existente e da validação em jogo.
+
+## 2. Objetivos de design
+
+O primeiro boss representa o primeiro grande desafio do jogador.
+
+| Power do jogador | Tempo-alvo | Experiência pretendida |
+|---:|---:|---|
+| 50.000 | 60 s | Intensa e difícil |
+| 75.000 | 40 s | Desafiadora |
+| 100.000 | 20 s | Relativamente fácil |
+
+Esses tempos representam objetivos iniciais, não resultados garantidos.
+
+O balanceamento precisa considerar a capacidade ofensiva e a sobrevivência do jogador. Um boss pode ter um TTK adequado e ainda ser injusto se causar dano excessivo ao jogador.
+
+## 3. Sistema de socos
+
+### 3.1. Localização no projeto
+
+O comportamento atual está documentado na região das linhas 389–409 de `Bag.luau`.
+
+### 3.2. Intervalos de ataque
+
+| Parâmetro | Valor | Significado |
+|---|---:|---|
+| `Config.Bag.holdInterval` | 0,25 s | Intervalo configurado para ataques ao segurar o botão |
+| Limite do servidor | 0,22 s | Intervalo mínimo aceito entre socos |
+| Frequência teórica ao segurar | 4 golpes/s | Referência baseada em 0,25 s |
+| Frequência máxima teórica do servidor | 4,55 golpes/s | Referência baseada em 0,22 s |
+
+A frequência teórica é o inverso do intervalo:
+
+`Frequência

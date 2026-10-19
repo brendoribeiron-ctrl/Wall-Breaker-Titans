@@ -16,10 +16,12 @@ local TweenService = game:GetService("TweenService")
 
 local Anims = require(ReplicatedStorage.Shared.GolemAnims)
 local Config = require(ReplicatedStorage.Shared.Config)
+require(ReplicatedStorage.Shared.GolemExperiment) -- EXPERIMENTO: põe o clip SlamV2 em GolemAnims (Config.Boss.slamV2)
 local Bag = require(script.Parent.Bag)
 local BossFx = require(script.Parent.BossFx)
 local BossRoom = require(script.Parent.BossRoom)
 local Fx = require(script.Parent.Fx)
+local GolemPose = require(script.Parent.GolemPose)
 local Hud = require(script.Parent.Hud)
 local Ui = require(script.Parent.Ui)
 
@@ -29,93 +31,17 @@ local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 local WHITE = Color3.new(1, 1, 1)
 
--- cor das fissuras e da magia de cada mundo (as mesmas do Boss.STYLES do servidor)
-local GLOW = { Color3.fromRGB(80, 190, 255), Color3.fromRGB(255, 84, 20) }
-local MAGIC = { Color3.fromRGB(150, 110, 255), Color3.fromRGB(255, 120, 60) }
-local ROCK = { Color3.fromRGB(36, 38, 54), Color3.fromRGB(38, 28, 28) }
+-- cor das fissuras, da magia e da pedra de cada mundo
+local PALETTE = BossFx.PALETTE
+local GLOW = { PALETTE[1].glow, PALETTE[2].glow }
+local MAGIC = { PALETTE[1].magic, PALETTE[2].magic }
+local ROCK = { PALETTE[1].rock, PALETTE[2].rock }
 
 local Boss = {}
 
----------------------------------------------------------------------------------------------------
--- Pose: amostra a animação e calcula o deslocamento de cada osso (cinemática direta)
-
-local BONES: { string } = Anims.bones
-local PARENTS: { number } = Anims.parents
-local HEADS: { Vector3 } = {}
-for i = 1, #BONES do
-	HEADS[i] = Vector3.new(Anims.heads[i * 3 - 2], Anims.heads[i * 3 - 1], Anims.heads[i * 3]) * S
-end
-local BONE_INDEX: { [string]: number } = {}
-for i, name in BONES do
-	BONE_INDEX[name] = i
-end
-
-type Pose = { loc: Vector3, rot: { CFrame } }
-
-local function quat(x: number, y: number, z: number): CFrame
-	local w = math.sqrt(math.max(0, 1 - x * x - y * y - z * z))
-	return CFrame.new(0, 0, 0, x, y, z, w)
-end
-
-local function frame(row: { number }): Pose
-	local rot = table.create(#BONES)
-	for i = 1, #BONES do
-		local k = 3 + (i - 1) * 3
-		rot[i] = quat(row[k + 1], row[k + 2], row[k + 3])
-	end
-	return { loc = Vector3.new(row[1], row[2], row[3]) * S, rot = rot }
-end
-
--- frames decodificados uma vez por animação
-local decoded: { [string]: { Pose } } = {}
-local function frames(clip: string): { Pose }
-	local list = decoded[clip]
-	if not list then
-		list = {}
-		for i, row in (Anims.clips :: any)[clip].frames do
-			list[i] = frame(row)
-		end
-		decoded[clip] = list
-	end
-	return list
-end
-
-local function mix(a: Pose, b: Pose, t: number): Pose
-	local rot = table.create(#BONES)
-	for i = 1, #BONES do
-		rot[i] = a.rot[i]:Lerp(b.rot[i], t)
-	end
-	return { loc = a.loc:Lerp(b.loc, t), rot = rot }
-end
-
-local function sample(clip: string, t: number): Pose
-	local data = (Anims.clips :: any)[clip]
-	local times: { number } = data.times
-	local list = frames(clip)
-	if data.loop then
-		t = t % data.length
-	else
-		t = math.clamp(t, 0, data.length)
-	end
-	local i = math.clamp(math.floor(t * Anims.fps) + 1, 1, #times - 1)
-	while i < #times - 1 and times[i + 1] < t do
-		i += 1
-	end
-	local span = times[i + 1] - times[i]
-	local u = if span > 0 then math.clamp((t - times[i]) / span, 0, 1) else 0
-	return mix(list[i], list[i + 1], u)
-end
-
-local function solve(pose: Pose): { CFrame }
-	local out = table.create(#BONES)
-	for i = 1, #BONES do
-		local h = HEADS[i]
-		local here = CFrame.new(h) * pose.rot[i] * CFrame.new(-h)
-		local parent = PARENTS[i]
-		out[i] = (if parent > 0 then out[parent] else CFrame.new(pose.loc)) * here
-	end
-	return out
-end
+local BONE_INDEX = GolemPose.index
+type Pose = GolemPose.Pose
+local mix, sample, solve = GolemPose.mix, GolemPose.sample, GolemPose.solve
 
 ---------------------------------------------------------------------------------------------------
 -- Um golem na tela
@@ -143,7 +69,13 @@ type Rig = {
 	stepAt: number,
 }
 
-local rigs: { [number]: Rig } = {}
+-- um por sala (pelo nome dela); só o da sala do jogador anima e aparece
+local rigs: { [string]: Rig } = {}
+
+local function myRig(): Rig?
+	local key = player:GetAttribute("RoomKey")
+	return if type(key) == "string" then rigs[key] else nil
+end
 
 local function serverTime(): number
 	return workspace:GetServerTimeNow()
@@ -184,7 +116,7 @@ local function build(rig: Rig): boolean
 	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
 	highlight.Parent = model
 	rig.highlight = highlight
-	model.Parent = workspace
+	model.Parent = nil -- update() põe no mundo quando a câmera está perto da sala
 	rig.model = model
 	rig.crumbled = false
 	rig.lit = -1
@@ -244,6 +176,7 @@ local function crumble(rig: Rig)
 		return
 	end
 	rig.crumbled = true
+	BossFx.death(ctxOf(rig))
 	local center = if rig.cf then rig.cf.Position else Vector3.zero
 	for _, part in rig.parts do
 		part.Anchored = false
@@ -260,11 +193,12 @@ end
 
 local function update(rig: Rig, dt: number)
 	local server = rig.server
-	if not rig.model or not rig.model.Parent then
+	if not rig.model then
 		if not build(rig) then
 			return
 		end
 	end
+	local model = rig.model :: Model
 	local target = rootCFrame(rig)
 	if not target then
 		return
@@ -273,17 +207,21 @@ local function update(rig: Rig, dt: number)
 	local started = server:GetAttribute("ClipStart") :: number? or 0
 	local defeated = server:GetAttribute("Defeated") == true
 
-	-- longe da sala não vale animar
+	-- longe da sala não vale animar; e o modelo sai do mundo (a cópia nasce na origem, que é o
+	-- meio do mapa, e sem animar ninguém move ela de lá)
 	if (camera.CFrame.Position - target.Position).Magnitude > 700 then
 		rig.cf = target
+		model.Parent = nil
 		return
 	end
-
 	if not defeated and rig.crumbled then
 		build(rig) -- voltou a dormir: golem inteiro de novo
 	end
 	if rig.crumbled then
 		return
+	end
+	if rig.model and not rig.model.Parent then
+		rig.model.Parent = workspace
 	end
 
 	-- raiz: segue a do servidor suavizando (ela chega 20 vezes por segundo)
@@ -373,7 +311,20 @@ local bar: Frame? = nil
 local fill: Frame? = nil
 local chip: Frame? = nil
 local title: TextLabel? = nil
+local pityLabel: TextLabel? = nil
 local shownHp = -1
+
+-- Vitórias no chefe do mundo `worldId` desde a última pena (atributo "BossWins": "1:12,2:3").
+local function bossWins(worldId: number): number
+	local raw = player:GetAttribute("BossWins")
+	for _, pair in string.split(if type(raw) == "string" then raw else "", ",") do
+		local id, wins = string.match(pair, "^(%d+):(%d+)$")
+		if tonumber(id) == worldId then
+			return tonumber(wins) :: number
+		end
+	end
+	return 0
+end
 
 local function makeBar()
 	local gui = Instance.new("ScreenGui")
@@ -393,12 +344,13 @@ local function makeBar()
 	local f = Ui.frame(back, "Fill", UDim2.fromScale(1, 1), nil, Color3.fromRGB(200, 30, 30))
 	Ui.corner(f, 4)
 	Ui.gradient(f, Color3.fromRGB(255, 90, 70), Color3.fromRGB(150, 10, 20))
+	-- pena: quantas vitórias faltam para o melhor personagem do mundo vir garantido
+	pityLabel = Ui.text(holder, { name = "Pity", text = "", color = Color3.fromRGB(255, 214, 40), size = UDim2.new(1, 0, 0, 20), position = UDim2.fromOffset(0, 54), textSize = 17, stroke = 2 })
 	bar, fill, chip, title = holder, f, c, name
 end
 
 local function updateBar()
-	local room = player:GetAttribute("Room")
-	local rig = if type(room) == "number" then rigs[room] else nil
+	local rig = myRig()
 	local holder = bar
 	if not holder or not fill or not chip or not title then
 		return
@@ -413,6 +365,11 @@ local function updateBar()
 	local hp = rig.server:GetAttribute("Hp") :: number? or 0
 	local maxHp = math.max(rig.server:GetAttribute("MaxHp") :: number? or 1, 1)
 	title.Text = rig.server:GetAttribute("Name") :: string? or "BOSS"
+	if pityLabel then
+		local world = Config.Worlds[rig.world] or Config.Worlds[1]
+		local best = Config.CharacterById[Config.bestCharacter(world)]
+		pityLabel.Text = `BOSS PITY {bossWins(world.id)}/{Config.Boss.pity}  ·  {string.upper(best.name)} GUARANTEED`
+	end
 	title.TextColor3 = if rig.server:GetAttribute("Rage") == true then Color3.fromRGB(255, 150, 120) else WHITE
 	if hp ~= shownHp then
 		if shownHp >= 0 and hp < shownHp and rig.highlight then
@@ -431,8 +388,8 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Cena do despertar: câmera baixa no rosto, ele levanta, ruge, nome do chefe
 
-local function intro(worldId: number)
-	local rig = rigs[worldId]
+local function intro(key: string)
+	local rig = rigs[key]
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if not rig or not root or not root:IsA("BasePart") then
@@ -476,8 +433,8 @@ local function intro(worldId: number)
 			camera.FieldOfView = 62 + 8 * u
 			if not titled and t > 3.6 then
 				titled = true
-				Fx.title(rig.server:GetAttribute("Name") :: string? or "BOSS", GLOW[worldId] or GLOW[1], 1.4)
-				Fx.flash(GLOW[worldId] or GLOW[1], 0.35, 0.4)
+				Fx.title(rig.server:GetAttribute("Name") :: string? or "BOSS", GLOW[rig.world] or GLOW[1], 1.4)
+				Fx.flash(GLOW[rig.world] or GLOW[1], 0.35, 0.4)
 			end
 		end
 		camera.CFrame = CFrame.lookAt(eye, look) * Fx.shakeCFrame()
@@ -519,8 +476,7 @@ end
 
 -- Centro do golem para o soco, se o jogador estiver perto o bastante dele.
 local function punchTarget(): Vector3?
-	local room = player:GetAttribute("Room")
-	local rig = if type(room) == "number" then rigs[room] else nil
+	local rig = myRig()
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if not rig or not rig.cf or not fightable(rig) or not root or not root:IsA("BasePart") then
@@ -541,14 +497,14 @@ function Boss.start()
 	local bossHit = remotes:WaitForChild("BossHit") :: RemoteEvent
 
 	local function watch(folder: Instance)
-		if not folder:IsA("Folder") or not string.match(folder.Name, "^BossRoom%d+$") then
+		if not folder:IsA("Folder") or not string.match(folder.Name, "^BossRoom%d+_?%d*$") then
 			return
 		end
 		task.spawn(function()
 			local server = folder:WaitForChild("Boss", 60)
 			local world = folder:GetAttribute("World")
 			if server and server:IsA("Model") and type(world) == "number" then
-				rigs[world] = {
+				rigs[folder.Name] = {
 					world = world,
 					server = server,
 					model = nil,
@@ -579,28 +535,37 @@ function Boss.start()
 	workspace.ChildAdded:Connect(watch)
 
 	RunService.RenderStepped:Connect(function(dt)
+		local mine = myRig()
 		for _, rig in rigs do
-			update(rig, dt)
+			if rig == mine then
+				update(rig, dt)
+			elseif rig.model and rig.model.Parent then
+				rig.model.Parent = nil
+			end
 		end
 		updateBar()
 	end)
 
-	bossRemote.OnClientEvent:Connect(function(kind: string, a: any, b: any)
+	bossRemote.OnClientEvent:Connect(function(kind: string, a: any, b: any, c: any)
 		if kind == "intro" then
 			task.spawn(intro, a)
 		elseif kind == "hit" then
 			onHit(a, b)
 		elseif kind == "hurt" then
-			local room = player:GetAttribute("Room")
-			local rig = if type(room) == "number" then rigs[room] else nil
+			local rig = myRig()
 			local character = player.Character
 			local root = character and character:FindFirstChild("HumanoidRootPart")
 			if rig and rig.cf and root and root:IsA("BasePart") then
 				local center = (rig.cf :: CFrame).Position + Vector3.new(0, 10 * S, 0)
 				local flat = Vector3.new(root.Position.X - center.X, 0, root.Position.Z - center.Z)
 				local dir = if flat.Magnitude > 0.1 then flat.Unit else Vector3.xAxis
-				BossFx.struck(center + dir * BOSS.radius * S + Vector3.new(0, -2, 0), dir, b == true, GLOW[rig.world] or GLOW[1])
+				local spot = center + dir * BOSS.radius * S + Vector3.new(0, -2, 0)
+				BossFx.struck(spot, dir, b == true, GLOW[rig.world] or GLOW[1])
 				Fx.shake(if b then 0.35 else 0.1)
+				-- Poder ganho pelo dano (Config.Boss.powerPerDamage)
+				if type(c) == "number" and c > 0 then
+					Bag.floatNumber(c, b == true, spot)
+				end
 			end
 		elseif kind == "victory" then
 			task.delay(2.6, Fx.title, "VICTORY", Color3.fromRGB(255, 214, 40), 1.6)
@@ -617,8 +582,7 @@ function Boss.start()
 end
 
 function Boss.debug(): { [string]: any }
-	local room = player:GetAttribute("Room")
-	local rig = if type(room) == "number" then rigs[room] else rigs[1]
+	local rig = myRig() or rigs.BossRoom1
 	if not rig then
 		return { built = false }
 	end
@@ -629,6 +593,7 @@ function Boss.debug(): { [string]: any }
 		crumbled = rig.crumbled,
 		position = rig.cf and rig.cf.Position,
 		bar = bar ~= nil and bar.Visible,
+		pity = if pityLabel then pityLabel.Text else "",
 		target = punchTarget() ~= nil,
 		head = rig.solved and pointOf(rig, "Head", Vector3.new(0, 25.4, -2.8) * S),
 		handR = rig.solved and pointOf(rig, "HandR", Vector3.new(10, 2, -1.5) * S),
